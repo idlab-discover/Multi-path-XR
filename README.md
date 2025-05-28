@@ -6,12 +6,10 @@ This project provides a simple way to transmit data between devices using numero
 
 # Supported Protocols
 
-- HTTP
+- DASH
 - Websockets
-- WebTransport
 - WebRTC
-- Flute
-- Route
+- FLUTE
 
 # Getting Started
 
