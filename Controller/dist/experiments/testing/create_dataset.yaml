@@ -1,0 +1,32 @@
+experiment_name: "Dynamic Role-Based Experiment"
+description: "This experiment dynamically assigns roles and executes commands and actions based on the role configuration and network conditions."
+
+environment:
+  name: "mininet"
+  number_of_nodes: 1
+  number_of_paths: 1
+  roles:
+    - role: server
+      target: n1
+      alias: server1
+actions:
+  - action: "Set default stream settings"
+    type: "curl"
+    execution_delay: 15000
+    url: "http://11.0.1.2:3001/streams/update_settings?stream_id=__default__&aggregator_bypass=true&presentation_time_offset=700"
+  - action: "Set file egress settings"
+    type: "curl"
+    execution_delay: 40000
+    url: "http://11.0.1.2:3001/egress/update_settings?egress_protocol=File&fps=30&encoding_format=Draco&max_number_of_points=100000&emit_with_ack=true"
+  - action: "Start job with file egress"
+    type: "curl"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress&ply_folder=Ply_pts_100000&fps=1&presentation_time_offset=700&should_loop=false&egress_protocol=File&stream_id=client_0_0"
+  - action: "Stop jobs after 10 minutes"
+    type: "curl"
+    execution_delay: 600000
+    url: "http://11.0.1.2:3001/stop_all_jobs"
+    # url: "http://11.0.1.2:3001/start_job?dataset=longdress&ply_folder=Ply_pts_10000&fps=10&presentation_time_offset=700&encoding=Draco&await_ack=true&should_loop=true"
+  - action: "Stop experiment after 10 minutes"
+    type: "exit"
+    execution_delay: 601000

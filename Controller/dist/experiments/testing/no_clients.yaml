@@ -1,0 +1,40 @@
+experiment_name: "Dynamic Role-Based Experiment"
+description: "This experiment dynamically assigns roles and executes commands and actions based on the role configuration and network conditions."
+
+environment:
+  name: "mininet"
+  number_of_nodes: 3
+  number_of_paths: 2
+  roles:
+    - role: server
+      target: n1
+      alias: server1
+    - role: nothing
+      target: n2
+      alias: client1
+    - role: nothing
+      target: n3
+      alias: client2
+    - role: router
+      target: r2
+      alias: multicast_router1
+    - role: router
+      target: r3
+      alias: unicast_router1
+actions:
+  - action: "Apply network conditions to the multicast router"
+    type: "tc"
+    target: "multicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"
+  - action: "Apply network conditions to the unicast router"
+    type: "tc"
+    target: "unicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"

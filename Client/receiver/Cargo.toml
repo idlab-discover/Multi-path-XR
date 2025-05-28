@@ -1,0 +1,45 @@
+[package]
+name = "pc-receiver"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []  # Default features, keep it empty to disable by default
+console-tracing = []  # Feature flag for console tracing
+
+[dependencies]
+draco-wrapper.workspace = true
+tmf.workspace = true
+ply-rs.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+futures.workspace = true
+rust_socketio = { workspace = true, features = ["async"] }
+serde.workspace = true
+serde_json.workspace = true
+libc = "0.2"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+console-subscriber.workspace = true
+interoptopus = "0.14.27"
+interoptopus_backend_csharp = "0.14.25"
+once_cell.workspace = true
+clap.workspace = true
+rayon.workspace = true
+webrtc.workspace = true
+flute.workspace = true
+url.workspace = true
+circular-buffer.workspace = true
+metrics.workspace = true
+bitcode.workspace = true
+rbase64.workspace = true
+prometheus.workspace = true
+shared_utils.workspace = true
+dash_player.workspace = true
+mp4_box.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"] # Allows us to build both a shared library and a Rust library
+
+[[bin]]
+name = "pc-receiver"
+path = "src/main.rs"  # Points to the main.rs file

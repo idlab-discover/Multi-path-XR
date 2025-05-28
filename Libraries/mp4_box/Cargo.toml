@@ -1,0 +1,13 @@
+[package]
+name = "mp4_box"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"] # Allows you to build both a shared library and a Rust library
+
+[[bin]]
+name = "mp4_box"
+path = "src/main.rs"  # Points to the main.rs file

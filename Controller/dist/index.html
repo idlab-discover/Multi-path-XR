@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Controller</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="yaml.js"></script>
+    <script src="graph.js"></script>
+    <script src="app.js" defer></script>
+</head>
+<body>
+    <div class="status-bar" id="status">
+        Loading...
+    </div>
+    <div class="container">
+        <header>
+            <h1>Network Controller</h1>
+        </header>
+        <main>
+            <div id="experiment">
+                <h2>Load Experiment</h2>
+
+                <div class="control-group">
+                    <label for="experimentSelect">Choose an Experiment:</label>
+                    <select id="experimentSelect">
+                        <option value="">Select an experiment</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="environmentSelect">Choose an Environment:</label>
+                    <select id="environmentSelect">
+                        <option value="mininet">Mininet</option>
+                        <option value="docker">Docker</option>
+                        <option value="virtual_wall">Virtual Wall</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label for="autoStopTime">Auto‑stop after (seconds):</label>
+                    <input  type="number"
+                            id="autoStopTime"
+                            name="autoStopTime"
+                            min="0"
+                            value="0">
+                </div>
+                <div class="control-group">
+                    <label>
+                        <input  type="checkbox"
+                                id="autoNextExperiment">
+                        Auto‑start next experiment when finished
+                    </label>
+                </div>
+                <div class="buttons">
+                    <button id="startBtn">Start Environment</button>
+                    <button id="stopBtn">Stop Environment</button>
+                </div>
+                <br>
+                <div id="experimentDescription" class="description"></div>
+            </div>
+            <div class="box">
+                <div class="control-group">
+                    <label for="n_nodes">Number of Nodes:</label>
+                    <input type="number" id="n_nodes" name="n_nodes" min="1" value="3" disabled>
+                </div>
+                <div class="control-group">
+                    <label for="n_paths">Number of Paths:</label>
+                    <input type="number" id="n_paths" name="n_paths" min="1" value="2" disabled>
+                </div>
+            </div>
+            <!-- Shared div for sections dependent on network status -->
+            <div id="networkSections" class="hidden">
+                <div id="visualization">
+                    <h2>Network Topology</h2>
+                    <img id="topologyImage" src="" alt="Topology Image">
+                </div>
+                <div class="box">
+                    <h2>Open XTerm</h2>
+                    <div class="control-group">
+                        <select id="nodeSelect">
+                            <option value="">Select a node</option>
+                        </select>
+                    </div>
+                    <div class="buttons">
+                        <button id="openXtermBtn">Open XTerm</button>
+                    </div>
+                </div>
+            </div>
+            <div id="serverSections" class="hidden">
+                <div class="box">
+                    <h2>Call api</h2>
+                    <!-- Choose the node -->
+                    <div class="control-group">
+                        <label for="nodeSelect2">Select Node:</label>
+                        <select id="nodeSelect2">
+                            <option value="">Select a node</option>
+                        </select>
+                    </div>
+                    <!-- Choose protocol -->
+                    <div class="control-group">
+                        <label for="protocolSelect">Protocol:</label>
+                        <select id="protocolSelect">
+                            <option value="http" selected>http</option>
+                            <option value="https">https</option>
+                        </select>
+                    </div>
+                    <!-- Set port (default 3001) -->
+                    <div class="control-group">
+                        <label for="apiPort">Port:</label>
+                        <input type="number" id="apiPort" name="apiPort" value="3001" min="1">
+                    </div>
+                    <!-- =========================================
+                    1. Datasets Endpoints
+                    ========================================= -->
+                    <!-- 1a. List Datasets -->
+                    <div class="api-section" id="section-list-datasets">
+                        <h2>List Datasets</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /datasets</p>
+                        <p>No parameters.</p>
+                        <div class="buttons">
+                            <button id="btn-list-datasets">Call List Datasets</button>
+                        </div>
+                        <div id="resp-list-datasets" class="api-response"></div>
+                    </div>
+                    
+                    <!-- 1b. List PLY Files -->
+                    <div class="api-section" id="section-list-ply-files">
+                        <h2>List PLY Files</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /datasets/ply_files</p>
+                        <div class="control-group">
+                            <label for="inp-ply-dataset">dataset (String):</label>
+                            <input type="text" id="inp-ply-dataset" placeholder="Enter dataset name">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-ply-folder">ply_folder (String):</label>
+                        <input type="text" id="inp-ply-folder" placeholder="Enter ply folder name">
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-list-ply-files">Call List PLY Files</button>
+                        </div>
+                        <div id="resp-list-ply-files" class="api-response"></div>
+                    </div>
+                    
+                    <!-- =========================================
+                        2. Egress Settings Endpoint
+                        ========================================= -->
+                    <div class="api-section" id="section-update-egress-settings">
+                        <h2>Update Egress Settings</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /egress/update_settings</p>
+                        <div class="control-group">
+                        <label for="inp-egress-fps">fps (optional, u32):</label>
+                        <input type="number" id="inp-egress-fps" placeholder="Frames per second" value="30">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-encoding">encoding_format (optional):</label>
+                        <select id="inp-egress-encoding">
+                        <option value="">--Select Encoding--</option>
+                        <option value="Ply">Ply</option>
+                        <option value="Draco" selected>Draco</option>
+                        <option value="LASzip">LASzip</option>
+                        <option value="Tmf">Tmf</option>
+                        <option value="Bitcode">Bitcode</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-max-points">max_number_of_points (optional, u64):</label>
+                        <input type="number" id="inp-egress-max-points" placeholder="Maximum points" value="100000">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-emit">emit_with_ack (optional, bool):</label>
+                        <select id="inp-egress-emit">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-content-encoding">content_encoding (optional, String):</label>
+                        <input type="text" id="inp-egress-content-encoding" placeholder="e.g. null, zlib">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-fec">fec (optional, String):</label>
+                        <input type="text" id="inp-egress-fec" placeholder="FEC scheme">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-fec-percentage">fec_percentage (optional, f32):</label>
+                        <input type="number" step="any" id="inp-egress-fec-percentage" placeholder="e.g. 0.06">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-bandwidth">bandwidth (optional, u32):</label>
+                        <input type="number" id="inp-egress-bandwidth" placeholder="Bandwidth limit">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-md5">md5 (optional, bool):</label>
+                        <select id="inp-egress-md5">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-egress-protocol">egress_protocol (required, String):</label>
+                        <select id="inp-egress-protocol">
+                        <option value="">--Select Protocol--</option>
+                        <option value="websocket">websocket</option>
+                        <option value="webrtc">webrtc</option>
+                        <option value="flute">flute</option>
+                        </select>
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-update-egress-settings">Call Update Egress Settings</button>
+                        </div>
+                        <div id="resp-update-egress-settings" class="api-response"></div>
+                    </div>
+                    
+                    <!-- =========================================
+                        3. Frame Ingestion Endpoint
+                        ========================================= -->
+                    <div class="api-section" id="section-receive-frame">
+                        <h2>Receive Frame</h2>
+                        <p><strong>Method:</strong> POST &nbsp;&nbsp; <strong>Path:</strong> /frames/receive</p>
+                        <div class="control-group">
+                        <label for="inp-frame-data">frame_data (String):</label>
+                        <textarea id="inp-frame-data" rows="5" placeholder="Enter raw frame data"></textarea>
+                        </div>
+                        
+                        <div class="buttons">
+                            <button id="btn-receive-frame">Call Receive Frame</button>
+                        </div>
+                        <div id="resp-receive-frame" class="api-response"></div>
+                    </div>
+                    
+                    <!-- =========================================
+                        4. Scheduler (Job Management) Endpoints
+                        ========================================= -->
+                    <!-- 4a. Start Transmission Job -->
+                    <div class="api-section" id="section-start-job">
+                        <h2>Start Transmission Job</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /start_job</p>
+                        <div class="control-group">
+                        <label for="inp-job-dataset">dataset (optional, String):</label>
+                        <input type="text" id="inp-job-dataset" placeholder="Dataset name">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-ply-folder">ply_folder (optional, String):</label>
+                        <input type="text" id="inp-job-ply-folder" placeholder="PLY folder name">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-fps">fps (required, u32):</label>
+                        <input type="number" id="inp-job-fps" placeholder="Frames per second" required value="30">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-presentation-offset">presentation_time_offset (required, u64):</label>
+                        <input type="number" id="inp-job-presentation-offset" placeholder="Time offset in ms" required value="100">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-loop">should_loop (required, bool):</label>
+                        <select id="inp-job-loop">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-priority">priority (optional, u8):</label>
+                        <input type="number" id="inp-job-priority" placeholder="Priority">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-egress-protocol">egress_protocol (required):</label>
+                        <select id="inp-job-egress-protocol">
+                        <option value="">--Select--</option>
+                        <option value="WebSocket">WebSocket</option>
+                        <option value="WebRTC">WebRTC</option>
+                        <option value="Flute">Flute</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-stream-id">stream_id (optional, String):</label>
+                        <input type="text" id="inp-job-stream-id" placeholder="Stream ID">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-job-generator">generator_name (optional):</label>
+                        <select id="inp-job-generator">
+                        <option value="">--Select--</option>
+                        <option value="Basic">Basic</option>
+                        <option value="Cube">Cube</option>
+                        </select>
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-start-job">Call Start Transmission Job</button>
+                        </div>
+                        <div id="resp-start-job" class="api-response"></div>
+                    </div>
+                    
+                    <!-- 4b. Stop a Transmission Job -->
+                    <div class="api-section" id="section-stop-job">
+                        <h2>Stop Transmission Job</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /stop_job</p>
+                        <div class="control-group">
+                        <label for="inp-stop-job-id">job_id (required, String):</label>
+                        <input type="text" id="inp-stop-job-id" placeholder="Job ID">
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-stop-job">Call Stop Transmission Job</button>
+                        </div>
+                        <div id="resp-stop-job" class="api-response"></div>
+                    </div>
+                    
+                    <!-- 4c. Stop All Jobs -->
+                    <div class="api-section" id="section-stop-all-jobs">
+                        <h2>Stop All Jobs</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /stop_all_jobs</p>
+                        <div class="buttons">
+                            <button id="btn-stop-all-jobs">Call Stop All Jobs</button>
+                        </div>
+                        <div id="resp-stop-all-jobs" class="api-response"></div>
+                    </div>
+                    
+                    <!-- =========================================
+                        5. Stream Settings Endpoints
+                        ========================================= -->
+                    <!-- 5a. Update Stream Settings -->
+                    <div class="api-section" id="section-update-stream-settings">
+                        <h2>Update Stream Settings</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /streams/update_settings</p>
+                        <div class="control-group">
+                        <label for="inp-stream-stream-id">stream_id (required, String):</label>
+                        <input type="text" id="inp-stream-stream-id" placeholder="Stream ID" required>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-priority">priority (optional, u8):</label>
+                        <input type="number" id="inp-stream-priority" placeholder="Priority">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-egress-protocols">egress_protocols (optional, comma-separated):</label>
+                        <input type="text" id="inp-stream-egress-protocols" placeholder="e.g. WebSocket,WebRTC">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-process-incoming">process_incoming_frames (optional, bool):</label>
+                        <select id="inp-stream-process-incoming">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-position">position (optional, [f32;3]):</label>
+                        <input type="text" id="inp-stream-position" placeholder="e.g. 0,0,0">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-rotation">rotation (optional, [f32;3]):</label>
+                        <input type="text" id="inp-stream-rotation" placeholder="e.g. 0,0,0">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-scale">scale (optional, [f32;3]):</label>
+                        <input type="text" id="inp-stream-scale" placeholder="e.g. 1,1,1">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-presentation-offset">presentation_time_offset (optional, u64):</label>
+                        <input type="number" id="inp-stream-presentation-offset" placeholder="Time offset in ms">
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-decode-bypass">decode_bypass (optional, bool):</label>
+                        <select id="inp-stream-decode-bypass">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-aggregator-bypass">aggregator_bypass (optional, bool):</label>
+                        <select id="inp-stream-aggregator-bypass">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="control-group">
+                        <label for="inp-stream-ring-buffer-bypass">ring_buffer_bypass (optional, bool):</label>
+                        <select id="inp-stream-ring-buffer-bypass">
+                        <option value="">--Select--</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                        </select>
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-update-stream-settings">Call Update Stream Settings</button>
+                        </div>
+                        <div id="resp-update-stream-settings" class="api-response"></div>
+                    </div>
+                    
+                    <!-- 5b. List Streams -->
+                    <div class="api-section" id="section-list-streams">
+                        <h2>List Streams</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /streams/list</p>
+                        <div class="buttons">
+                            <button id="btn-list-streams">Call List Streams</button>
+                        </div>
+                        <div id="resp-list-streams" class="api-response"></div>
+                    </div>
+                    
+                    <!-- =========================================
+                        6. WebSocket (Socket Management) Endpoints
+                        ========================================= -->
+                    <!-- 6a. List Sockets -->
+                    <div class="api-section" id="section-list-sockets">
+                        <h2>List Sockets</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /sockets</p>
+
+                        <div class="buttons">
+                            <button id="btn-list-sockets">Call List Sockets</button>
+                        </div>
+                        <div id="resp-list-sockets" class="api-response"></div>
+                    </div>
+                    
+                    <!-- 6b. Clean Sockets -->
+                    <div class="api-section" id="section-clean-sockets">
+                        <h2>Clean Sockets</h2>
+                        <p><strong>Method:</strong> GET &nbsp;&nbsp; <strong>Path:</strong> /sockets/clean</p>
+                        <div class="control-group">
+                        <label for="inp-clean-sockets">sockets (Vec&lt;String&gt; as comma-separated):</label>
+                        <input type="text" id="inp-clean-sockets" placeholder="socket1,socket2,...">
+                        </div>
+                        <div class="buttons">
+                            <button id="btn-clean-sockets">Call Clean Sockets</button>
+                        </div>
+                        <div id="resp-clean-sockets" class="api-response"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

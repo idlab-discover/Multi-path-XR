@@ -1,0 +1,17 @@
+[package]
+name = "shared_utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitcode.workspace = true
+webrtc.workspace = true
+bytes.workspace = true
+serde.workspace = true
+async-trait.workspace = true
+ply-rs.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+dashmap.workspace = true
+circular-buffer.workspace = true
+bitvec.workspace = true

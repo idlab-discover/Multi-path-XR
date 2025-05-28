@@ -1,0 +1,16 @@
+[package]
+name = "dash_player"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+reqwest.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+bytes.workspace = true
+serde.workspace = true
+chrono.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+iso8601-duration = "0.2.0"

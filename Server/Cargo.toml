@@ -1,0 +1,47 @@
+[package]
+name = "pc-server"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []  # Default features, keep it empty to disable by default
+console-tracing = []  # Feature flag for console tracing
+
+[dependencies]
+byteorder.workspace = true
+clap.workspace = true
+socketioxide = { workspace = true, features = [] }
+uuid = { workspace = true, features = ["v4", "serde"] }
+socket2 = {workspace = true, features = ["all"]}
+axum.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
+tower.workspace = true
+tracing-subscriber.workspace = true
+tracing.workspace = true
+tracing-tracy.workspace = true
+console-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+metrics.workspace = true
+tmf.workspace = true
+draco-wrapper.workspace = true
+ply-rs.workspace = true
+rayon.workspace = true
+circular-buffer.workspace = true
+webrtc.workspace = true
+rand.workspace = true
+nalgebra.workspace = true
+glam.workspace = true
+flute.workspace = true
+url.workspace = true
+prometheus.workspace = true
+bitcode.workspace = true
+bytes.workspace = true
+rbase64.workspace = true
+async-trait.workspace = true
+futures.workspace = true
+shared_utils.workspace = true
+dash_player.workspace = true
+mp4_box.workspace = true
+chrono.workspace = true

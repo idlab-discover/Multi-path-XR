@@ -1,0 +1,58 @@
+experiment_name: "Dynamic Role-Based Experiment"
+description: "This experiment dynamically assigns roles and executes commands and actions based on the role configuration and network conditions."
+
+environment:
+  name: "mininet"
+  number_of_nodes: 3
+  number_of_paths: 2
+  roles:
+    - role: server
+      target: n1
+      alias: server1
+    - role: client
+      target: n2
+      alias: client1
+      server_ip: "13.0.1.2"
+      visible: true
+    - role: router
+      target: r2
+      alias: multicast_router1
+    - role: router
+      target: r3
+      alias: unicast_router1
+actions:
+  - action: "Apply network conditions to the multicast router"
+    type: "tc"
+    target: "multicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"
+  - action: "Apply network conditions to the unicast router"
+    type: "tc"
+    target: "unicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"
+  - action: "Set default stream settings"
+    type: "curl"
+    execution_delay: 39000
+    url: "http://11.0.1.2:3001/streams/update_settings?stream_id=__default__&decode_bypass=true&presentation_time_offset=700"
+  - action: "Set webrtc egress settings"
+    type: "curl"
+    execution_delay: 40000
+    url: "http://11.0.1.2:3001/egress/update_settings?egress_protocol=WebRTC&fps=30&encoding_format=Draco&max_number_of_points=100000&emit_with_ack=true"
+  - action: "Start job with webrtc egress"
+    type: "curl"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress&ply_folder=Dra_pts_100000&fps=30&presentation_time_offset=700&should_loop=true&egress_protocol=WebRTC&stream_id=client_0_0"
+  - action: "Stop jobs after 10 minutes"
+    type: "curl"
+    execution_delay: 600000
+    url: "http://11.0.1.2:3001/stop_all_jobs"
+  - action: "Stop experiment after 10 minutes"
+    type: "exit"
+    execution_delay: 601000

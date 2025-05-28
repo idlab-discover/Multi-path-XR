@@ -1,0 +1,70 @@
+[workspace]
+members = ["Agent", "Controller", "Server", "Client/receiver", "Libraries/Draco", "Libraries/Metrics", "Libraries/tmf", "Libraries/shared_utils", "Libraries/dash_player", "Libraries/mp4_box"]
+exclude = ["target"]
+resolver = "2"
+
+[profile.dev]
+opt-level = 1
+lto = "thin"
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.no-opt]
+inherits = "dev"
+opt-level = 0
+lto = false
+[profile.no-opt.package."*"]
+opt-level = 0
+
+[workspace.dependencies]
+async-trait = "0.1.88"
+byteorder = "1.5.0"
+futures = "0.3.31"
+tokio = { version = "1.42.0", features = ["full", "tracing"]}
+tokio-util = "0.7.14"
+socketioxide = { version = "0.15.1", features = ["state"]  }
+rust_socketio = { git = "https://github.com/mendess/rust-socketio.git", branch="mendess/ack-server-request", features = ["async"] }
+serde = { version = "1.0.215", features = ["derive"] }
+serde_json = "1.0.133"
+tower = { version = "0.5.1", default-features = false }
+tower-http = "0.6.2"
+tracing = { version = "0.1.41", features = ["attributes"]}
+tracing-subscriber = "0.3.19"
+tracing-tracy = "0.11.4"
+console-subscriber = "0.4.1"
+socket2 = { version = "0.5.2", features = ["all"]}
+axum = { version = "0.7.9", features = ["macros"]}
+hyper-util = "0.1.10"
+hyper = { version = "1.5.1", features = ["http1", "server"] }
+clap = { version = "4.5.23", features = ["derive"] }
+indexmap = "2.7.0"
+rayon = "1.10.0"
+circular-buffer = "0.1.9"
+metrics = { path = "./Libraries/Metrics" }
+draco-wrapper = { path = "./Libraries/Draco" }
+ply-rs = { path = "./Libraries/ply-rs" }
+tmf = { path = "./Libraries/tmf" }
+shared_utils = { path = "./Libraries/shared_utils" }
+dash_player = { path = "./Libraries/dash_player" }
+mp4_box = { path = "./Libraries/mp4_box" }
+reqwest = { version = "0.12.9", features = ["blocking", "json", "stream"] }
+sysinfo = "0.33.0"
+regex = "1.11.1"
+once_cell = "1.20.2"
+webrtc = { git = "https://github.com/mcabla/webrtc.git", branch = "large-message-size"}
+rand = "0.8.5"
+nalgebra = "0.33.2"
+glam = "0.29.2"
+flute = "1.8.1"
+uuid = "1.11.0"
+url = "2.5.4"
+prometheus = "0.13.4"
+sha2 = "0.10.8"
+dashmap = "6.1.0"
+bitcode = "0.6.3"
+bytes = "1.8.0"
+rbase64 = "2.0.3"
+bitvec = "1.0.1"
+chrono = "0.4.40"
+quick-xml = "0.37.4"
+polars = "0.47.1"

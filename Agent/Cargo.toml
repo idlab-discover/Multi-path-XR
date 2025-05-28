@@ -1,0 +1,15 @@
+[package]
+name = "pc-agent"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { workspace = true, features = ["full", "process"] }
+rust_socketio = { workspace = true, features = ["async"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+sysinfo.workspace = true
+regex.workspace = true
