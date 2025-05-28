@@ -1,0 +1,12 @@
+[submodule "Client/pc_renderer_unity"]
+	path = Client/pc_renderer_unity
+	url = git@github.com:mcabla/pc_renderer_unity.git
+[submodule "Libraries/Draco/draco"]
+	path = Libraries/Draco/draco
+	url = https://github.com/google/draco.git
+[submodule "Libraries/tmf"]
+	path = Libraries/tmf
+	url = https://github.com/FractalFir/tmf.git
+[submodule "Libraries/ply-rs"]
+	path = Libraries/ply-rs
+    url = https://github.com/mcabla/ply-rs.git
