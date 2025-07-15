@@ -107,14 +107,24 @@ If you have any questions or concerns, please feel free to contact us at [casper
 
 If you use (parts of) this code, please cite the following paper:
 ```bibtex
-@INPROCEEDINGS{Haems2509MutliPathXR,
+@INPROCEEDINGS{Haem2509:Efficient,
     AUTHOR="Casper Haems and Matthias {De Fr{\'e}} and Tim Wauters and Filip {De Turck}",
     TITLE="Towards Efficient Transport for {Real-Time} Immersive Applications over Hybrid Networks",
     BOOKTITLE="2025 16th International Conference on Network of the Future (NoF) (NoF 2025)",
     ADDRESS="Montreal, Canada",
-    PAGES=9,
-    KEYWORDS="volumetric video; hybrid broadcast-unicast; multi-path transport real-time streaming; immersive media; 6DoF communication",
-    ABSTRACT="Immersive telepresence applications demand significant data rates with real-time delivery targets that no single commercial data path can consistently meet. Moreover, existing adaptive strategies with fine-grained content selection remain underdeveloped. This paper introduces a hybrid, multi-path delivery framework that fuses broadcast and unicast communication into one coherent service. Lightweight volumetric video is delivered via broadcast using File Delivery over Unidirectional Transport (FLUTE), guaranteeing that every viewer maintains at least a never-blank scene. Viewer-specific enhancement content is steered over unicast channels by a scheduler that keeps all volumetric video frames within a common playout deadline. This work releases an open-source testbed that emulates network impairments, instruments the common protocols of the different stages in the pipeline, and allows reproducible experimentation. Results on a high-quality, volumetric video of up to 100k points per frame show that the hybrid design (i) is capable of keeping the transport latency below 40ms while scaling quality with available unicast bandwidth, (ii) cuts server traffic and network load significantly compared with pure-unicast delivery, and (iii) masks typical wireless loss patterns with only a 15\% Forward Error Correction (FEC) overhead on the broadcast link. These findings demonstrate that treating broadcast and unicast as complementary pipes, rather than competing alternatives, is essential for practical, large-scale Extended Reality (XR) services on emerging 5G/6G networks. All code is publicly released to accelerate further research on hybrid, multi-path delivery."
+    PAGES=5,
+    DAYS=30,
+    MONTH=sep,
+    YEAR=2025,
+    KEYWORDS="volumetric video; hybrid broadcast-unicast; multi-path transport; real-time streaming; immersive media; 6DoF communication",
+    ABSTRACT="Immersive telepresence demands high data rates and low latency, yet no single commercial data path reliably meets these needs. Fine-grained content selection also remains underdeveloped. This work proposes a hybrid, multi-path delivery framework combining broadcast and unicast into a single service. A lightweight base scene is broadcast via File Delivery over Unidirectional Transport (FLUTE), ensuring no viewer ever sees a fully blank scene, while viewer-specific enhancements are steered over unicast. An open-source testbed is released to investigate the impact of network impairments, instrument common protocols, and enable reproducible experiments. On high-quality volumetric video (up to 100k points per frame at 30 frames per second), the hybrid design (i) keeps latency below 40 ms while scaling quality with unicast bandwidth, (ii) reduces server and network load compared to pure unicast, and (iii) masks typical wireless loss patterns with only 15\% Forward Error Correction (FEC) overhead. These findings show that treating broadcast and unicast as complementary channels is crucial for scalable Extended Reality (XR) services."
 }
-
 ```
+
+# Funding
+This work has been funded by the European Union (SPIRIT
+project, Grant Agreement 101070672, [https://www.spiritproject.eu/](https://www.spiritproject.eu/)).
+
+# License
+This project is licensed under the MIT License.
+See the [LICENSE](LICENSE) file for details.
