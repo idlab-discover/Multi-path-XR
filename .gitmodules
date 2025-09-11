@@ -1,6 +1,6 @@
 [submodule "Client/pc_renderer_unity"]
 	path = Client/pc_renderer_unity
-	url = git@github.com:mcabla/pc_renderer_unity.git
+	url = git@github.com:mcabla/Multi-path-XR-Client.git
 [submodule "Libraries/Draco/draco"]
 	path = Libraries/Draco/draco
 	url = https://github.com/google/draco.git
