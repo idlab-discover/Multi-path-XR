@@ -23,17 +23,20 @@ impl std::fmt::Debug for DinfBox {
 // Implementation of the `Mp4Box` trait for the `DinfBox` struct.
 impl Mp4Box for DinfBox {
     // Returns the box type as a 4-byte array. For `DinfBox`, the type is "dinf".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"dinf" }
 
     // Calculates the size of the `DinfBox` in bytes.
     // The size includes 8 bytes for the header (4 bytes for size and 4 bytes for type)
     // and the size of the contained `DrefBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.dref.box_size()
     }
 
     // Writes the `DinfBox` to the provided buffer.
     // The method serializes the box size, box type, and the contained `DrefBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

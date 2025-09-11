@@ -43,12 +43,15 @@ impl std::fmt::Debug for VmhdBox {
 }
 
 impl Mp4Box for VmhdBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"vmhd" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 2 + 6  // header + version/flags + graphicsmode + opcolor (3*2)
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

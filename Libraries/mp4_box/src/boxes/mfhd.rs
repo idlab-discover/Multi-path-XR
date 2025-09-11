@@ -43,6 +43,7 @@ impl std::fmt::Debug for MfhdBox {
 // Implementation of the `Mp4Box` trait for the `MfhdBox` struct.
 impl Mp4Box for MfhdBox {
     // Returns the box type as a 4-byte array. For `MfhdBox`, the type is "mfhd".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mfhd" }
 
     // Calculates the size of the `MfhdBox` in bytes.
@@ -50,12 +51,14 @@ impl Mp4Box for MfhdBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - 4 bytes for the version and flags.
     // - 4 bytes for the `sequence_number` field.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4  // Header + version/flags + sequence_number
     }
 
     // Writes the `MfhdBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `sequence_number` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

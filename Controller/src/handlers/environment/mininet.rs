@@ -51,6 +51,9 @@ impl MininetHandler {
                     task::spawn(async move {
                         while let Ok(Some(line)) = reader.next_line().await {
                             info!("{} {}", log_prefix, line);
+                            // We should yield here, as this while loop is not very important
+                            // and we want to allow other tasks to run.
+                            tokio::task::yield_now().await;
                         }
                     });
                 }
@@ -62,6 +65,9 @@ impl MininetHandler {
                     task::spawn(async move {
                         while let Ok(Some(line)) = reader.next_line().await {
                             error!("{} {}", log_prefix, line);
+                            // We should yield here, as this while loop is not very important
+                            // and we want to allow other tasks to run.
+                            tokio::task::yield_now().await;
                         }
                     });
                 }
@@ -73,7 +79,7 @@ impl MininetHandler {
             }
             Err(e) => {
                 error!("Failed to start Mininet server: {:?}", e);
-                Err(format!("Failed to start Mininet server: {:?}", e))
+                Err(format!("Failed to start Mininet server: {e:?}"))
             }
         }
     }
@@ -89,7 +95,7 @@ impl MininetHandler {
                 }
                 Err(e) => {
                     error!("Failed to stop Mininet server: {:?}", e);
-                    Err(format!("Failed to stop Mininet server: {:?}", e))
+                    Err(format!("Failed to stop Mininet server: {e:?}"))
                 }
             }
         } else {
@@ -141,7 +147,7 @@ impl EnvironmentHandler for MininetHandler {
                     Err(err)
                 }
             }
-            Err(e) => Err(format!("Failed to start Mininet: {}", e)),
+            Err(e) => Err(format!("Failed to start Mininet: {e}")),
         }
     }
 
@@ -160,7 +166,7 @@ impl EnvironmentHandler for MininetHandler {
                     Err(err)
                 }
             }
-            Err(e) => Err(format!("Failed to stop Mininet: {}", e)),
+            Err(e) => Err(format!("Failed to stop Mininet: {e}")),
         }
     }
 
@@ -180,7 +186,7 @@ impl EnvironmentHandler for MininetHandler {
                     Err(err)
                 }
             }
-            Err(e) => Err(format!("Failed to execute command: {}", e)),
+            Err(e) => Err(format!("Failed to execute command: {e}")),
         }
     }
 
@@ -192,7 +198,7 @@ impl EnvironmentHandler for MininetHandler {
 
         match response {
             Ok(resp) => resp.json().await.map_err(|e| e.to_string()),
-            Err(e) => Err(format!("Failed to get nodes: {}", e)),
+            Err(e) => Err(format!("Failed to get nodes: {e}")),
         }
     }
 
@@ -204,7 +210,7 @@ impl EnvironmentHandler for MininetHandler {
 
         match response {
             Ok(resp) => resp.json().await.map_err(|e| e.to_string()),
-            Err(e) => Err(format!("Failed to get links: {}", e)),
+            Err(e) => Err(format!("Failed to get links: {e}")),
         }
     }
 
@@ -216,7 +222,7 @@ impl EnvironmentHandler for MininetHandler {
 
         match response {
             Ok(resp) => resp.json().await.map_err(|e| e.to_string()),
-            Err(e) => Err(format!("Failed to get status: {}", e)),
+            Err(e) => Err(format!("Failed to get status: {e}")),
         }
     }
 
@@ -236,7 +242,7 @@ impl EnvironmentHandler for MininetHandler {
                     Err(err)
                 }
             }
-            Err(e) => Err(format!("Failed to get visualization: {}", e)),
+            Err(e) => Err(format!("Failed to get visualization: {e}")),
         }
     }
 
@@ -256,7 +262,7 @@ impl EnvironmentHandler for MininetHandler {
                     Err(json["error"].as_str().unwrap_or("Unknown error").to_string())
                 }
             }
-            Err(e) => Err(format!("Failed to start xterm: {}", e)),
+            Err(e) => Err(format!("Failed to start xterm: {e}")),
         }
     }
 
@@ -268,7 +274,7 @@ impl EnvironmentHandler for MininetHandler {
 
         match response {
             Ok(resp) => resp.json().await.map_err(|e| e.to_string()),
-            Err(e) => Err(format!("Failed to ping all: {}", e)),
+            Err(e) => Err(format!("Failed to ping all: {e}")),
         }
     }
 }

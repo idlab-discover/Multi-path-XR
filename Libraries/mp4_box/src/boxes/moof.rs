@@ -29,6 +29,7 @@ impl std::fmt::Debug for MoofBox {
 // Implementation of the `Mp4Box` trait for the `MoofBox` struct.
 impl Mp4Box for MoofBox {
     // Returns the box type as a 4-byte array. For `MoofBox`, the type is "moof".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"moof" }
 
     // Calculates the size of the `MoofBox` in bytes.
@@ -36,12 +37,14 @@ impl Mp4Box for MoofBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - The size of the `MfhdBox`.
     // - The size of the `TrafBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.mfhd.box_size() + self.trafs.iter().map(|t| t.box_size()).sum::<u32>()
     }
 
     // Writes the `MoofBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `MfhdBox` and `TrafBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
@@ -79,7 +82,7 @@ impl Mp4Box for MoofBox {
         while offset < size {
             let box_type = &data[offset+4..offset+8];
             if box_type != b"traf" {
-                return Err(format!("Unexpected box type in MOOF: {:?}", box_type));
+                return Err(format!("Unexpected box type in MOOF: {box_type:?}"));
             }
             let (traf, traf_size) = TrafBox::read_box(&data[offset..])?;
             trafs.push(traf);

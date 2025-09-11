@@ -36,6 +36,7 @@ impl std::fmt::Debug for TrafBox {
 // Implementation of the `Mp4Box` trait for the `TrafBox` struct.
 impl Mp4Box for TrafBox {
     // Returns the box type as a 4-byte array. For `TrafBox`, the type is "traf".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"traf" }
 
     // Calculates the size of the `TrafBox` in bytes.
@@ -44,6 +45,7 @@ impl Mp4Box for TrafBox {
     // - The size of the `TfhdBox`.
     // - The size of the `TfdtBox`.
     // - The size of the `TrunBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let mut size = 8; // header
         size += self.tfhd.box_size();
@@ -59,6 +61,7 @@ impl Mp4Box for TrafBox {
     // Writes the `TrafBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `TfhdBox`,
     // `TfdtBox`, and `TrunBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

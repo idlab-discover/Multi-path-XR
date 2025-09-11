@@ -3,36 +3,40 @@ use crate::{storage::Storage, types::FrameData};
 use crate::processing::decoders::decode_data;
 use rayon::{ThreadPoolBuilder, ThreadPool};
 use tokio::runtime::{Builder, Runtime};
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 pub mod decoders;
 
 pub struct ProcessingPipeline {
     storage: Arc<Storage>,
     thread_pool: Arc<ThreadPool>,
-    pub runtime: Arc<Mutex<Runtime>>,
+    pub runtime: Arc<Mutex<Option<Runtime>>>,
     disable_parser: bool,
 }
+crate::log_drop!(ProcessingPipeline);
 
 impl ProcessingPipeline {
     pub fn new(storage: Arc<Storage>, thread_count: usize, disable_parser: bool) -> Self {// Initialize thread pool
+        info!("Creating processing pipeline");
+
         let thread_pool = Arc::new(
             ThreadPoolBuilder::new()
+                .thread_name(|i| format!("PP_TP w-{}", i+1))
                 .num_threads(thread_count)
                 .build()
                 .expect("Failed to build thread pool"),
         );
-        let runtime = Arc::new(Mutex::new(
+        let runtime = Arc::new(Mutex::new(Some(
             Builder::new_multi_thread()
                 .thread_name_fn(|| {
                     static ATOMIC_WEBRTC_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
                     let id = ATOMIC_WEBRTC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    format!("PP_R w-{}", id)
+                    format!("PP_RU w-{id}")
                 })
                 .enable_all()
                 .build()
                 .expect("Failed to build runtime"),
-        ));
+        )));
 
         Self {
             storage,
@@ -40,6 +44,31 @@ impl ProcessingPipeline {
             runtime,
             disable_parser
         }
+    }
+
+
+    pub fn stop(&self) {
+        if let Some(rt) = self.runtime.lock().unwrap().take() {
+            rt.shutdown_timeout(std::time::Duration::from_secs(1));            
+            info!("Processing pipeline runtime stopped");
+        } else {
+            error!("Processing pipeline runtime was already stopped or not initialized");
+        }
+    }
+
+    pub fn empty_frame(&self, stream_id: String) {
+        self.storage.empty_frame(stream_id.clone());
+        // Per-stream
+        self.storage.clone()
+            .metrics
+            .get_or_create_labelled_gauge(
+                "send_to_receive_time_diff_per_stream",
+                "Difference (us) between send time and receive time of a frame per stream",
+                &["stream_id"],
+                &[&stream_id],
+            )
+            .expect("send_to_receive_time_diff_per_stream")
+            .set(0_i64);
     }
 
 
@@ -89,7 +118,19 @@ impl ProcessingPipeline {
 
                     frame_data.receive_time = start_time.duration_since(UNIX_EPOCH).unwrap().as_micros() as u64;
                     let send_to_receive = frame_data.receive_time.saturating_sub(frame_data.send_time);
+                    // Global
                     storage.clone().send_to_receive_time_diff.set(send_to_receive as i64);
+                    // Per-stream
+                    storage.clone()
+                        .metrics
+                        .get_or_create_labelled_gauge(
+                            "send_to_receive_time_diff_per_stream",
+                            "Difference (us) between send time and receive time of a frame per stream",
+                            &["stream_id"],
+                            &[&stream_id],
+                       )
+                        .expect("send_to_receive_time_diff_per_stream")
+                        .set(send_to_receive as i64);
 
                     storage.insert_frame(stream_id, frame_data);
                 }

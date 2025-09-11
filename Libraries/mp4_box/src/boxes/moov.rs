@@ -35,6 +35,7 @@ impl std::fmt::Debug for MoovBox {
 // Implementation of the `Mp4Box` trait for the `MoovBox` struct.
 impl Mp4Box for MoovBox {
     // Returns the box type as a 4-byte array. For `MoovBox`, the type is "moov".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"moov" }
 
     // Calculates the size of the `MoovBox` in bytes.
@@ -43,6 +44,7 @@ impl Mp4Box for MoovBox {
     // - The size of the `MvhdBox`.
     // - The size of the `TrakBox`.
     // - The size of the `MvexBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.mvhd.box_size() +
         self.traks.iter().map(|t| t.box_size()).sum::<u32>() +
@@ -54,6 +56,7 @@ impl Mp4Box for MoovBox {
     // Writes the `MoovBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `MvhdBox`,
     // `TrakBox`, and `MvexBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
@@ -143,7 +146,7 @@ impl Mp4Box for MoovBox {
                     offset += consumed;
                 }
                 _ => {
-                    return Err(format!("Unknown box type in MOOV: {:?}", box_type));
+                    return Err(format!("Unknown box type in MOOV: {box_type:?}"));
                 }
             }
         }

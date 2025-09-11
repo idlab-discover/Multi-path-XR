@@ -1,0 +1,67 @@
+experiment_name: "Dynamic Role-Based Experiment"
+description: "This experiment dynamically assigns roles and executes commands and actions based on the role configuration and network conditions."
+
+environment:
+  name: "mininet"
+  number_of_nodes: 2
+  number_of_paths: 2
+  roles:
+    - role: server
+      target: n1
+      alias: server1
+    - role: nothing # This should be client if we want to have a client
+      visible: true
+      target: n2
+      alias: client1
+      server_ip: "13.0.1.2"
+    - role: router
+      target: r2
+      alias: multicast_router1
+    - role: router
+      target: r3
+      alias: unicast_router1
+actions:
+  - action: "Apply network conditions to the multicast router"
+    type: "tc"
+    target: "multicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"
+  - action: "Apply network conditions to the unicast router"
+    type: "tc"
+    target: "unicast_router1"
+    execution_delay: 35000
+    connected_node: "client1"
+    bandwidth: "200mbit"
+    packet_loss: "0%"
+    network_delay: "0ms"
+  - action: "Set default stream settings"
+    type: "curl"
+    execution_delay: 39000
+    url: "http://11.0.1.2:3001/streams/update_settings?stream_id=__default__&decode_bypass=true&presentation_time_offset=700"
+  - action: "Set dash egress settings"
+    type: "curl"
+    execution_delay: 40000
+    url: "http://11.0.1.2:3001/egress/update_settings?egress_protocol=Buffer&fps=30&encoding_format=Draco&max_number_of_points=100000&emit_with_ack=true"
+  - action: "Set flute egress settings"
+    type: "curl"
+    execution_delay: 40000
+    url: "http://11.0.1.2:3001/egress/update_settings?egress_protocol=Flute&fps=30&encoding_format=Draco&max_number_of_points=100000&bandwidth=600000000&fec=nocode&fec_percentage=0.15&content_encoding=null"
+  - action: "Quality 0: Start job with flute egress"
+    type: "curl" # "ignore"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress_loot&ply_folder=Dra_pts_30000&fps=30&presentation_time_offset=700&should_loop=true&egress_protocol=Flute&stream_id=client_0_0"
+  - action: "Quality 1: Start job with dash egress"
+    type: "curl"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress_demo&ply_folder=Dra_pts_25000&fps=30&presentation_time_offset=700&should_loop=true&egress_protocol=Buffer&stream_id=client_1_1"
+  - action: "Quality 2: Start job with dash egress"
+    type: "curl"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress_demo&ply_folder=Dra_pts_60000&fps=30&presentation_time_offset=700&should_loop=true&egress_protocol=Buffer&stream_id=client_1_2"
+  - action: "Quality 3: Start job with dash egress"
+    type: "curl"
+    execution_delay: 41000
+    url: "http://11.0.1.2:3001/start_job?dataset=longdress_demo&ply_folder=Dra_pts_85000&fps=30&presentation_time_offset=700&should_loop=true&egress_protocol=Buffer&stream_id=client_1_3"

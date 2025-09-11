@@ -3,12 +3,14 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::types::FrameData;
 use circular_buffer::CircularBuffer;
-use metrics::get_metrics;
+use metrics::{get_metrics, Metrics as AppMetrics};
 use prometheus::IntGauge;
-use tracing::info;
+use tracing::{debug, info};
 
 pub struct Storage {
+    pub metrics: AppMetrics,
     buffers: RwLock<HashMap<String, Arc<RwLock<CircularBuffer<30, FrameData>>>>>,
+    latest_presentation_time: RwLock<HashMap<String, u64>>,
     last_consumed_point_counts: RwLock<HashMap<String, u64>>,
     pub reception_time_flute: IntGauge,
     pub frames_consumed_total: IntGauge,
@@ -23,6 +25,7 @@ pub struct Storage {
     pub total_point_count: IntGauge,
     pub quality_metric: IntGauge,
 }
+crate::log_drop!(Storage);
 
 impl Default for Storage {
     fn default() -> Self {
@@ -116,7 +119,9 @@ impl Storage {
             .expect("Failed to create quality_metric gauge");
 
         Storage {
+            metrics: metrics.clone(),
             buffers: RwLock::new(HashMap::new()),
+            latest_presentation_time: RwLock::new(HashMap::new()),
             last_consumed_point_counts: RwLock::new(HashMap::new()),
             reception_time_flute,
             frames_consumed_total,
@@ -133,6 +138,32 @@ impl Storage {
         }
     }
 
+    pub fn reset(&self) {
+        let mut buffers = self.buffers.write().unwrap();
+        buffers.clear();
+        self.latest_presentation_time.write().unwrap().clear();
+        self.last_consumed_point_counts.write().unwrap().clear();
+
+        // Reset all metrics
+        self.reception_time_flute.set(0);
+        self.frames_consumed_total.set(0);
+        self.frames_received_total.set(0);
+        self.frames_skipped_total.set(0);
+        self.current_backlog.set(0);
+        self.send_to_receive_time_diff.set(0);
+        self.send_to_consume_time_diff.set(0);
+        self.receive_to_consume_time_diff.set(0);
+        self.point_count_metric.set(0);
+        self.decode_time.set(0);
+        self.total_point_count.set(0);
+        self.quality_metric.set(0);
+    }
+
+    pub fn empty_frame(&self, stream_id: String) {
+        // This does not insert anything, but does reset the last_consumed_point_counts to 0
+        self.last_consumed_point_counts.write().unwrap().insert(stream_id, 0);
+    }
+
     pub fn insert_frame(&self, stream_id: String, mut frame: FrameData) {
         // info!("Inserting frame with presentation time: {}", frame.presentation_time);
         // Check if the presentation time is 0
@@ -144,8 +175,39 @@ impl Storage {
             };
             frame.presentation_time = current_time;
         }
+
+       // ---- Out-of-order guard (per stream) ----
+       {
+           let mut latest_map = self.latest_presentation_time.write().unwrap();
+           let latest = latest_map.entry(stream_id.clone()).or_insert(0);
+           if frame.presentation_time < *latest {
+               // Drop strictly older frames to enforce monotonic order
+               self.frames_skipped_total.inc();
+               self.frames_received_total.inc();
+               self.metrics
+                   .get_or_create_labelled_gauge(
+                       "frames_received_total_per_stream",
+                       "Total number of frames received per stream",
+                       &["stream_id"],
+                       &[&stream_id],
+                   )
+                   .expect("frames_received_total_per_stream")
+                   .inc();
+               debug!(
+                   "Dropping OOO frame: ts={} < latest={} (stream_id={})",
+                   frame.presentation_time, *latest, stream_id
+               );
+               return;
+           }
+           // Accept equal or newer timestamps; track newest seen
+           if frame.presentation_time > *latest {
+               *latest = frame.presentation_time;
+           }
+       }
+
         let mut buffers = self.buffers.write().unwrap();
         let buffer = buffers.entry(stream_id.clone()).or_insert_with(|| {
+            info!("Creating new buffer for stream_id: {}", stream_id);
             Arc::new(RwLock::new(CircularBuffer::new()))
         });
         {
@@ -154,14 +216,25 @@ impl Storage {
                 // The first frame will be dropped by this circular buffer
                 self.frames_skipped_total.inc();
             }
-            b.push_back(frame)
+            b.push_back(frame);
         }
         self.frames_received_total.inc();
+        self.metrics
+            .get_or_create_labelled_gauge(
+                "frames_received_total_per_stream",
+                "Total number of frames received per stream",
+                &["stream_id"],
+                &[&stream_id],
+            )
+            .expect("frames_received_total_per_stream")
+            .inc();
     }
 
     pub fn get_stream_ids(&self) -> Vec<String> {
         let buffers = self.buffers.read().unwrap();
-        buffers.keys().cloned().collect()
+        let mut stream_ids: Vec<String> = buffers.keys().cloned().collect();
+        stream_ids.sort();
+        stream_ids
     }
 
     pub fn get_frame_count(&self, stream_id: &String) -> usize {
@@ -274,7 +347,7 @@ impl Storage {
                         buffer.pop_front();
                         self.frames_skipped_total.inc();
                     }
-                    info!("Skipped {} frames for stream_id = {} (catch-up).", frame_index, stream_id);
+                    debug!("Skipped {} frames for stream_id = {} (catch-up).", frame_index, stream_id);
                 }
             }
 

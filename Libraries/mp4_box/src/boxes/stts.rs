@@ -66,6 +66,7 @@ impl std::fmt::Debug for SttsEntry {
 // Implementation of the `Mp4Box` trait for the `SttsBox` struct.
 impl Mp4Box for SttsBox {
     // Returns the box type as a 4-byte array. For `SttsBox`, the type is "stts".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stts" }
 
     // Calculates the size of the `SttsBox` in bytes.
@@ -73,6 +74,7 @@ impl Mp4Box for SttsBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - 4 bytes for the version and flags.
     // - 4 bytes for the `entry_count` field, which is set to 0 in this implementation.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + (self.entries.len() as u32 * 8)
         // 8 header + 4 version/flags + 4 entry_count + entries
@@ -80,6 +82,7 @@ impl Mp4Box for SttsBox {
 
     // Writes the `SttsBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `entry_count` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

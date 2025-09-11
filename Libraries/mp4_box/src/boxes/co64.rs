@@ -38,13 +38,16 @@ impl std::fmt::Debug for Co64Box {
 }
 
 impl Mp4Box for Co64Box {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"co64" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + (self.entries.len() as u32) * 8
         // 8 = header, 4 = version+flags, 4 = entry_count, each entry = 8 bytes
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

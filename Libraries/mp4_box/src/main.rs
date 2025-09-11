@@ -24,7 +24,7 @@ fn run_file_mode(filename: &str) {
     let data = match fs::read(filename) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Failed to read file '{}': {}", filename, e);
+            eprintln!("Failed to read file '{filename}': {e}");
             process::exit(1);
         }
     };
@@ -32,7 +32,7 @@ fn run_file_mode(filename: &str) {
     let boxes = match parse_mp4_boxes(&data) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to parse MP4 boxes: {}", e);
+            eprintln!("Failed to parse MP4 boxes: {e}");
             process::exit(1);
         }
     };
@@ -63,7 +63,7 @@ fn run_test_mode() {
     let init_boxes = match parse_mp4_boxes(&init_buffer) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to parse INIT segment: {}", e);
+            eprintln!("Failed to parse INIT segment: {e}");
             process::exit(1);
         }
     };
@@ -75,13 +75,13 @@ fn run_test_mode() {
 
     // 2️⃣ Create MEDIA segment with static frame data
     let frame_data = vec![0u8; 1024];  // Static dummy frame data
-    let media_buffer = create_media_segment(&config, &frame_data, 1, 0);
+    let media_buffer = create_media_segment(&config, frame_data, 1, 0);
     println!("Generated MEDIA segment ({} bytes)", media_buffer.len());
 
     let media_boxes = match parse_mp4_boxes(&media_buffer) {
         Ok(b) => b,
         Err(e) => {
-            eprintln!("Failed to parse MEDIA segment: {}", e);
+            eprintln!("Failed to parse MEDIA segment: {e}");
             process::exit(1);
         }
     };
@@ -97,7 +97,7 @@ fn run_test_mode() {
             println!("Extracted {} mdat box(es) from MEDIA segment.\n", mdat_boxes.len());
         }
         Err(e) => {
-            eprintln!("Failed to extract mdat boxes: {}", e);
+            eprintln!("Failed to extract mdat boxes: {e}");
         }
     }
 }

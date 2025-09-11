@@ -76,7 +76,7 @@ impl Payloader for PointCloudPayloader {
             out.put_u32_le(quality_nr); // quality
             out.put(
                 &*payload_data.slice(offset..(offset + chunk_len)),
-            );
+            ); // TODO: how does put compare with put_slice? Which is more efficient?
 
             output.push(out.freeze());
 

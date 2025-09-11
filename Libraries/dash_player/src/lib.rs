@@ -14,6 +14,9 @@ pub enum DashEvent {
         url: String,
         playback_rate: f64,
     },
+    EmptySegment {
+        segment_number: u64,
+    },
     DownloadError {
         url: String,
         reason: String,

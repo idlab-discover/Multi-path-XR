@@ -73,7 +73,7 @@ pub fn start_generator_thread(
     let encoding_format_clone = encoding_format.clone();
     let max_number_of_points_clone = max_number_of_points.clone();
     let egress_name_clone = egress_name.clone();
-    let thread_name = format!("{} Generator Thread", egress_name);
+    let thread_name = format!("{egress_name_clone} Generator Thread");
     let _ = thread::Builder::new().name(thread_name).spawn(move || {
         generate_and_send_combined_point_clouds(
             egress_name_clone,
@@ -112,6 +112,7 @@ fn generate_and_send_combined_point_clouds(
     /*
     let thread_pool = Arc::new(
         ThreadPoolBuilder::new()
+            .thread_name(|i| format!("E_TP w-{}", i+1))
             .num_threads(thread_count)
             .build()
             .expect("Failed to build thread pool"),
@@ -391,7 +392,7 @@ pub fn start_transmission_thread<F>(
     let frame_buffer_clone = frame_buffer.clone();
     let emit_frame_data_clone = emit_frame_data.clone();
     let egress_name_clone = egress_name.clone();
-    let thread_name = format!("{} Transmission Thread", egress_name);
+    let thread_name = format!("{egress_name} Transmission Thread");
 
 
     let _ = thread::Builder::new().name(thread_name).spawn(move || {
@@ -544,31 +545,31 @@ pub trait EgressProtocol: Send + Sync {
 
     // Enqueue a decoded point cloud for processing
     // It will be aggregated and encoded
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables)]
     fn push_point_cloud(&self, point_cloud: PointCloudData, stream_id: String);
 
     // Fast path to push a pre-encoded frame
     // This is used when we want to bypass the ring buffer
     // Or when we want to bypass the aggregation.
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables, clippy::too_many_arguments)]
     fn push_encoded_frame(&self, raw_data: Vec<u8>, stream_id: String, creation_time: u64, presentation_time: u64, ring_buffer_bypass: bool, client_id: Option<u64>, tile_index: Option<u32>);
 
     /// Emits frame data
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables)]
     fn emit_frame_data(&self, frame: FrameTaskData);
 
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables)]
     fn set_fps(&self, fps: u32);
 
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables)]
     fn set_encoding_format(&self, encoding_format: EncodingFormat);
 
-    #[instrument(skip_all)]
+    //#[instrument(skip_all)]
     #[allow(unused_variables)]
     fn set_max_number_of_points(&self, max_number_of_points: u64);
 }

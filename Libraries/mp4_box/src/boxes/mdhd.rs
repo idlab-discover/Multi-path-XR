@@ -65,6 +65,7 @@ impl std::fmt::Debug for MdhdBox {
 // Implementation of the `Mp4Box` trait for the `MdhdBox` struct.
 impl Mp4Box for MdhdBox {
     // Returns the box type as a 4-byte array. For `MdhdBox`, the type is "mdhd".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mdhd" }
 
     // Calculates the size of the `MdhdBox` in bytes.
@@ -74,6 +75,7 @@ impl Mp4Box for MdhdBox {
     // - 4 bytes each for `creation_time`, `modification_time`, `timescale`, and `duration`.
     // - 2 bytes for the packed language field.
     // - 2 bytes for the `pre_defined` field.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let base = 8 + 4;  // header + version/flags
         let variable = if self.version == 1 { 28 } else { 16 };
@@ -83,6 +85,7 @@ impl Mp4Box for MdhdBox {
     // Writes the `MdhdBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, `creation_time`,
     // `modification_time`, `timescale`, `duration`, language, and `pre_defined` fields into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

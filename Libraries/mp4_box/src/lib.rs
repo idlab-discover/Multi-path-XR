@@ -67,9 +67,9 @@ pub fn format_fourcc(fourcc: &[u8; 4]) -> String {
 pub fn format_capped_bytes(data: &[u8]) -> String {
     let capped = &data[..data.len().min(8)];
     if data.len() > 8 {
-        format!("{:?} ...", capped)
+        format!("{capped:?} ...")
     } else {
-        format!("{:?}", capped)
+        format!("{capped:?}")
     }
 }
 

@@ -138,6 +138,9 @@ impl ActionExecutor {
             "exit" => {
                 info!("TODO: Exiting experiment automatically");
             }
+            "ignore" => {
+                info!("Ignoring action: {}", action.action);
+            }
             other => {
                 warn!("Unknown action type '{}'", other);
             }

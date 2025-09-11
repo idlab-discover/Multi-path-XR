@@ -58,7 +58,7 @@ pub fn read_mp4_box(data: &[u8]) -> Result<(Mp4BoxEnum, usize), String> {
     let box_type = &data[4..8];
 
     match box_type {
-        // TODO: Add more box types as needed
+        // TODO: Add more box types if needed
         b"co64" => Co64Box::read_box(data).map(|(b, s)| (Mp4BoxEnum::Co64(b), s)),
         b"ctts" => CttsBox::read_box(data).map(|(b, s)| (Mp4BoxEnum::Ctts(b), s)),
         b"dinf" => DinfBox::read_box(data).map(|(b, s)| (Mp4BoxEnum::Dinf(b), s)),

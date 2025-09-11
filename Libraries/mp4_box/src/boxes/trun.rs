@@ -43,12 +43,15 @@ impl std::fmt::Debug for TrunBox {
 }
 
 impl Mp4Box for TrunBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"trun" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + 4 + 4  // header + version/flags + sample_count + data_offset + sample_size
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
@@ -71,12 +74,12 @@ impl Mp4Box for TrunBox {
         let version = data[8];
         let flags = u32::from_be_bytes([0, data[9], data[10], data[11]]);
         if flags != 0x000005 {
-            return Err(format!("Unsupported TRUN flags: 0x{:06X}", flags));
+            return Err(format!("Unsupported TRUN flags: 0x{flags:06X}"));
         }
 
         let sample_count = u32::from_be_bytes(data[12..16].try_into().unwrap());
         if sample_count != 1 {
-            return Err(format!("Expected 1 sample, got {}", sample_count));
+            return Err(format!("Expected 1 sample, got {sample_count}"));
         }
 
         let data_offset = i32::from_be_bytes(data[16..20].try_into().unwrap());

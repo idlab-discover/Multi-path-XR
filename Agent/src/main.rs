@@ -10,6 +10,15 @@ use regex::Regex;
 use tracing_subscriber::FmtSubscriber;
 use std::process::{Child, Command, Stdio};
 use std::io::{BufRead, BufReader};
+use once_cell::sync::Lazy;
+
+// Regex to match ANSI escape codes
+static ANSI_ESCAPE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap_or_else(|e| {
+        error!("Failed to compile regex: {}", e);
+        Regex::new("").unwrap()
+    })
+});
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "pc-agent")]
@@ -80,7 +89,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // Wait one second before sending the logs
                         thread::sleep(Duration::from_secs(1));
 
-                        emit_log(&s, "info", &format!("WebSocket connected with id: {} for {}", socket_id, node_id));
+                        emit_log(&s, "info", &format!("WebSocket connected with id: {socket_id} for {node_id}"));
                     }
                 }
             }
@@ -129,13 +138,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let result = result.join(" , \n");
                             emit_log(&socket, "info", result.as_str());
                             emit_log(&socket, "info", &format!(
-                                "Successfully applied network conditions on {:?}: {} Mbit, {} ms, {}% loss",
-                                interfaces, bandwidth_mbit, latency_ms, loss_percent
+                                "Successfully applied network conditions on {interfaces:?}: {bandwidth_mbit} Mbit, {latency_ms} ms, {loss_percent}% loss"
                             ));
                         }
                         Err(e) => {
                             emit_log(&socket, "error", &format!(
-                                "Failed to set network conditions: {}", e
+                                "Failed to set network conditions: {e}"
                             ));
                         }
                     }
@@ -149,7 +157,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let thread_pool = Arc::clone(&thread_pool);
             move |payload, socket| {
                 if let Payload::Text(data) = payload {
-                    emit_log(&socket.clone(), "info", &format!("Received start_process command: {:?}", data));
+                    emit_log(&socket.clone(), "info", &format!("Received start_process command: {data:?}"));
                     let mut args: Vec<String> = data.iter().filter_map(|v| v.as_str().map(String::from)).collect();
                     // All the strings should be split by spaces
                     args = args.iter().flat_map(|s| s.split_whitespace().map(String::from)).collect();
@@ -158,9 +166,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let socket_clone = socket.clone();
                         match thread_pool.lock() {
                             Ok(mut pool) => {
-                                pool.push(thread::spawn(move || {
-                                    start_process(process_clone, args, socket_clone);
-                                }));
+                                pool.push(thread::Builder::new()
+                                    .name("start_process_thread".to_string())
+                                    .spawn(move || {
+                                        start_process(process_clone, args, socket_clone);
+                                    })
+                                    .expect("Failed to spawn start_process_thread"));
                             }
                             Err(e) => {
                                 error!("Failed to acquire lock on thread_pool: {}", e);
@@ -180,9 +191,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let socket_clone = socket.clone();
                 match thread_pool.lock() {
                     Ok(mut pool) => {
-                        pool.push(thread::spawn(move || {
-                            stop_process(process_clone, socket_clone);
-                        }));
+                        pool.push(thread::Builder::new()
+                            .name("stop_process_thread".to_string())
+                            .spawn(move || {
+                                stop_process(process_clone, socket_clone);
+                            })
+                            .expect("Failed to spawn stop_process_thread"));
                     }
                     Err(e) => {
                         error!("Failed to acquire lock on thread_pool: {}", e);
@@ -236,11 +250,7 @@ fn emit_log(socket: &RawClient, level: &str, data: &str) {
 
 /// Sanitize log messages to remove unwanted characters
 fn sanitize_log(data: &str) -> String {
-    // Regex to match ANSI escape codes
-    let ansi_escape = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap_or_else(|e| {
-        error!("Failed to compile regex: {}", e);
-        Regex::new("").unwrap()
-    });
+    let ansi_escape = &*ANSI_ESCAPE;
 
     // Remove ANSI escape codes and filter out other control characters
     ansi_escape.replace_all(data, "").replace(|c: char| c.is_control(), "").to_string()
@@ -272,7 +282,7 @@ fn kill_duplicate_processes(node_id: &str) -> Result<(), Box<dyn std::error::Err
             let args = process.cmd().iter().map(|s| s.to_string_lossy()).collect::<Vec<_>>().join(" ");
             let parent_pid = process.parent().unwrap_or_else(|| 0.into());
             if parent_pid != current_pid
-                && args.contains(&format!("--node-id {}", node_id)) {
+                && args.contains(&format!("--node-id {node_id}")) {
                 info!("Killing duplicate process: PID {}, Command {:?}", process.pid(), process.cmd());
                 info!("The parent PID is: {}", process.parent().unwrap_or_else(|| 0.into()));
                 if !process.kill() {
@@ -312,27 +322,33 @@ fn start_process(process: Arc<Mutex<Option<Child>>>, command_args: Vec<String>, 
                 let socket_clone_stderr = socket.clone();
 
                 if let Some(stdout) = stdout {
-                    thread::spawn(move || {
-                        let reader = BufReader::new(stdout);
-                        for line_result in reader.lines() {
-                            match line_result {
-                                Ok(line) => emit_log(&socket_clone_stdout, "info", &line),
-                                Err(e) => error!("Error reading stdout: {}", e),
+                    thread::Builder::new()
+                        .name("process_stdout_thread".to_string())
+                        .spawn(move || {
+                            let reader = BufReader::new(stdout);
+                            for line_result in reader.lines() {
+                                match line_result {
+                                    Ok(line) => emit_log(&socket_clone_stdout, "info", &line),
+                                    Err(e) => error!("Error reading stdout: {}", e),
+                                }
                             }
-                        }
-                    });
+                        })
+                        .expect("Failed to spawn process_stdout_thread");
                 }
 
                 if let Some(stderr) = stderr {
-                    thread::spawn(move || {
-                        let reader = BufReader::new(stderr);
-                        for line_result in reader.lines() {
-                            match line_result {
-                                Ok(line) => emit_log(&socket_clone_stderr, "error", &line),
-                                Err(e) => error!("Error reading stderr: {}", e),
+                    thread::Builder::new()
+                        .name("process_stderr_thread".to_string())
+                        .spawn(move || {
+                            let reader = BufReader::new(stderr);
+                            for line_result in reader.lines() {
+                                match line_result {
+                                    Ok(line) => emit_log(&socket_clone_stderr, "error", &line),
+                                    Err(e) => error!("Error reading stderr: {}", e),
+                                }
                             }
-                        }
-                    });
+                        })
+                        .expect("Failed to spawn process_stderr_thread");
                 }
 
                 *process_guard = Some(child);
@@ -345,7 +361,7 @@ fn start_process(process: Arc<Mutex<Option<Child>>>, command_args: Vec<String>, 
             }
         }
         Err(e) => {
-            emit_log(&socket, "error", &format!("Failed to start process: {}", e));
+            emit_log(&socket, "error", &format!("Failed to start process: {e}"));
         }
     }
 }
@@ -361,7 +377,7 @@ fn stop_process(process: Arc<Mutex<Option<Child>>>, socket: RawClient) {
                         if e.kind() == std::io::ErrorKind::InvalidInput {
                             emit_log(&socket, "info", "Process has already exited");
                         } else {
-                            emit_log(&socket, "error", &format!("Failed to kill process: {}", e));
+                            emit_log(&socket, "error", &format!("Failed to kill process: {e}"));
                         }
                     }
                 }
@@ -379,7 +395,9 @@ fn stop_process(process: Arc<Mutex<Option<Child>>>, socket: RawClient) {
 /// Get a list of all available network interfaces on the system.
 pub fn get_all_interfaces() -> Vec<String> {
     let networks = Networks::new_with_refreshed_list();
-    networks.keys().cloned().collect()
+    let mut interfaces: Vec<String> = networks.keys().cloned().collect();
+    interfaces.sort();
+    interfaces
 }
 
 
@@ -391,10 +409,9 @@ pub fn set_network_conditions(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut result = Vec::new();
     result.push(format!(
-        "Setting network conditions: {} bandwidth, {} latency, {} loss",
-        bandwidth_mbit, latency_ms, loss_percent
+        "Setting network conditions: {bandwidth_mbit} bandwidth, {latency_ms} latency, {loss_percent} loss"
     ));
-    result.push(format!("Interfaces: {:?}", interfaces));
+    result.push(format!("Interfaces: {interfaces:?}"));
     for interface in interfaces {
         // 1) Check if the qdisc is currently noqueue or htb
         let show_output = Command::new("sudo")

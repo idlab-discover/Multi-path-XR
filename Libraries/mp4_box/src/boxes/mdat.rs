@@ -26,18 +26,21 @@ impl std::fmt::Debug for MdatBox {
 // Implementation of the `Mp4Box` trait for the `MdatBox` struct.
 impl Mp4Box for MdatBox {
     // Returns the box type as a 4-byte array. For `MdatBox`, the type is "mdat".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mdat" }
 
     // Calculates the size of the `MdatBox` in bytes.
     // The size includes:
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - The size of the `data` field, which contains the raw media data.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.data.len() as u32
     }
 
     // Writes the `MdatBox` to the provided buffer.
     // The method serializes the box size, box type, and the raw media data into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

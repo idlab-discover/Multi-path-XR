@@ -6,6 +6,7 @@ import random
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -274,6 +275,8 @@ def execute_command(request_handler=None, query_params=None, body=None) -> bool:
             output = proc.stdout.readline()
             if output and request_handler:
                 request_handler._send_chunk(output)
+                # Sleep to allow other threads to run
+                time.sleep(0.001)
             elif proc.poll() is not None:
                 break
 
@@ -310,7 +313,7 @@ def list_nodes(request_handler=None, query_params=None, body=None) -> list:
             request_handler._send_response(400, {"message": "Network not running"})
         return
     
-    info("Getting all the nodes in the Mininet network")
+    #info("Getting all the nodes in the Mininet network")
     try:
         nodes = [{"name": node.name, "type": type(node).__name__} for node in net.values()]
         if request_handler:
@@ -330,7 +333,7 @@ def list_links(request_handler=None, query_params=None, body=None) -> list:
             request_handler._send_response(400, {"message": "Network not running"})
         return []
     
-    info("Getting all the links in the Mininet network")
+    #info("Getting all the links in the Mininet network")
     try:
         links = []
         for link in net.links:

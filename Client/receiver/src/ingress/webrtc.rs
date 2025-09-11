@@ -1,4 +1,5 @@
 use std::{sync::{Arc, Mutex}, thread};
+use rust_socketio::client::Client;
 use tokio::{runtime::Runtime, sync::RwLock};
 use tracing::{debug, error, info, instrument};
 use webrtc::{ice_transport::ice_candidate::RTCIceCandidateInit, peer_connection::{
@@ -16,14 +17,14 @@ use shared_utils::{peer_connection::create_webrtc_peer_connection, track_remote_
 pub struct WebRTCIngress {
     /// Our single PeerConnection, or None if not created yet
     pc: RwLock<Option<Arc<RTCPeerConnection>>>,
-    /// Reference to the StreamManager
-    stream_manager: Arc<StreamManager>,
     /// Reference to the pipeline for decoding/storing frames
     pipeline: Arc<ProcessingPipeline>,
     /// Pending ICE candidates to be applied after the remote description is set
     pending_candidates: RwLock<Vec<RTCIceCandidateInit>>,
-    pub runtime: Arc<Mutex<Runtime>>,
+    pub runtime: Arc<Mutex<Option<Runtime>>>,
+    track_handlers: Arc<RwLock<Vec<TrackRemotePointCloudRTP>>>,
 }
+crate::log_drop!(WebRTCIngress);
 
 impl WebRTCIngress {
     /// Create a new, empty instance. Typically called once from `Ingress::initialize()`.
@@ -35,27 +36,51 @@ impl WebRTCIngress {
 
         let ingress = Arc::new(Self {
             pc: RwLock::new(None),
-            stream_manager: stream_manager.clone(),
             pipeline,
             pending_candidates: RwLock::new(Vec::new()),
-            runtime
+            runtime,
+            track_handlers: Arc::new(RwLock::new(Vec::new())),
         });
         // Keep a reference to ourselves in the StreamManager
         stream_manager.set_webrtc_ingress(ingress);
     }
 
+    pub fn stop(&self) {
+        if let Some(rt) = self.runtime.lock().unwrap().as_ref() {
+            rt.block_on(async {
+                if let Some(pc) = self.pc.write().await.take() {
+                    let _ = pc.close().await;
+                } else {
+                    error!("WebRTC PeerConnection was already stopped or not initialized");
+                }
+
+                let mut handlers = self.track_handlers.write().await;
+                info!("Stopping {} track handlers", handlers.len());
+                for mut track in handlers.drain(..) {
+                    if let Err(e) = track.stop().await {
+                        error!("Failed to stop track: {:?}", e);
+                    } else {
+                        info!("Track stopped successfully");
+                    }
+                }
+            });
+        } else {
+            error!("Runtime is not available anymore, we cannot manually stop the PeerConnection");
+        }
+    }
+
     /// Actually create the PeerConnection on the client side, attach handlers, and produce an SDP offer.
-    #[instrument(skip(self))]
-    pub async fn create_offer(&self) -> Result<String, String> {
+    //#[instrument(skip(self))]
+    pub async fn create_offer(self: Arc<Self>, ws_socket: &Arc<Mutex<Option<Client>>>) -> Result<String, String> {
         // 1) Create PeerConnection
         let pc = create_webrtc_peer_connection().await?;
 
         // 2) **Forward client-side ICE to server**:  
         //    Whenever the client finds a new ICE candidate,
         //    it sends it to the server as `webrtc_ice_candidate`.
-        let sm_clone = self.stream_manager.clone();
+        let socket_weak = Arc::downgrade(ws_socket);
         pc.on_ice_candidate(Box::new(move |c| {
-            let sm_clone2 = sm_clone.clone();
+            let socket_weak = socket_weak.clone();
             Box::pin(async move {
                 debug!("Client-side ICE candidate found");
                 if let Some(candidate) = c {
@@ -67,35 +92,25 @@ impl WebRTCIngress {
                             "sdpMLineIndex": json_candidate.sdp_mline_index,
                         });
 
-                        debug!("Client-side ICE candidate: {:?}", json_val.clone());
+                        //debug!("Client-side ICE candidate: {:?}", json_val.clone());
 
                         // Spawn a normal non-async thread and emit the ICE candidate
-                        // Rustsocket-io doesn't support calling emit from an async context when we already block that context
-                        thread::spawn(move || {
-                            // Get a reference to the WebSocketIngress
-                            let websocket_ingress = {
-                                match sm_clone2.websocket_ingress.read().unwrap().as_ref() {
-                                    Some(i) => i.clone(),
-                                    None => {
-                                        error!("WebSocketIngress not found, did you call WebSocketIngress::initialize()?");
-                                        return;
+                        // Rustsocket-io doesn't support calling emit from an async context because it uses its own internal runtime.
+                        // That internal runtime uses blocking, which is incompatible with our async context.
+                        thread::Builder::new()
+                            .name("emit-ice-candidate".to_string())
+                            .spawn(move || {
+                                if let Some(socket_arc) = socket_weak.upgrade() {
+                                    if let Some(ref socket) = *socket_arc.lock().unwrap() {
+                                        if let Err(err) = socket.emit("webrtc_ice_candidate", json_val) {
+                                            error!("Failed to emit ICE candidate: {}", err);
+                                        }
                                     }
+                                } else {
+                                    error!("WebSocket client is not connected, cannot send ICE candidate");
                                 }
-                            };
-                            let socket_option = websocket_ingress.get_socket();
-                            let socket_guard = socket_option.lock().unwrap();
-                            let socket = match &*socket_guard {
-                                Some(s) => s,
-                                None => {
-                                    error!("WebSocket not connected, did you call WebSocketIngress::connect()?");
-                                    return;
-                                }
-                            };
-
-                            if let Err(err) = socket.emit("webrtc_ice_candidate", json_val) {
-                                error!("Failed to emit ICE candidate: {}", err);
-                            }
-                        });
+                            })
+                            .expect("Failed to spawn ICE candidate emission thread");
                     }
                 }
             })
@@ -103,23 +118,44 @@ impl WebRTCIngress {
 
         // Set the handler for Peer connection state
         // This will notify you when the peer has connected/disconnected
+        let ingress_clone = Arc::clone(&self);
         pc.on_peer_connection_state_change(Box::new(
             move |s: RTCPeerConnectionState| {
                 info!("Peer Connection State has changed: {s}");
-                Box::pin(async {})
-            },
-        ));
+                let ingress_clone = Arc::clone(&ingress_clone);
+                Box::pin(async move {
+                    if matches!(s, RTCPeerConnectionState::Disconnected | RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
+                        info!("Cleaning up peer connection");
+                        // Stop all tracks
+                        {
+                            let mut handlers = ingress_clone.track_handlers.write().await;
+                            info!("Stopping {} track handlers", handlers.len());
+                            for mut track in handlers.drain(..) {
+                                if let Err(e) = track.stop().await {
+                                    error!("Failed to stop track: {:?}", e);
+                                } else {
+                                    info!("Track stopped successfully");
+                                }
+                            }
+                            info!("All tracks stopped");
+                        }
+                    }
+                })
+            })
+        );
 
         pc.add_transceiver_from_kind(RTPCodecType::Video, None)
             .await
             .map_err(|e| format!("add_transceiver_from_kind failed: {e}"))?;
 
         let pipeline_clone = self.pipeline.clone();
+        let track_handlers_clone = Arc::clone(&self.track_handlers);
         pc.on_track(Box::new(move | track, _receiver, _transceiver| {
             let p = pipeline_clone.clone();
+            let th = track_handlers_clone.clone();
             Box::pin(async move {
                 info!("Created new track");
-                let some_on_frame_cb = Arc::new(move |frame: FrameTaskData| {            
+                let some_on_frame_cb = Arc::new(move |frame: FrameTaskData| { 
                     // info!("Received frame with {} bytes", frame.data.len());
                 
                     p.ingest_data(
@@ -129,10 +165,16 @@ impl WebRTCIngress {
                         frame.presentation_time,
                         frame.data);
                 });
-            
-                let mut remote_pc_track = TrackRemotePointCloudRTP::new(track, some_on_frame_cb);
-                remote_pc_track.start(); 
-                // TODO: we should store this track somewhere so we can stop it when the connection is closed   
+
+               let mut remote_pc_track = TrackRemotePointCloudRTP::new(track, some_on_frame_cb);
+                remote_pc_track.start();
+                // Store handler so it can be stopped later
+                {
+                    let mut v = th.write().await;
+                    let before = v.len();
+                    v.push(remote_pc_track);
+                    info!("on_track: handlers len {} -> {}", before, v.len());
+                }
             })
         }));
 

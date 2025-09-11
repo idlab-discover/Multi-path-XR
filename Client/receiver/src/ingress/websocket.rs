@@ -17,10 +17,11 @@ pub struct WebSocketIngress {
     socket: Arc<Mutex<Option<Client>>>,
     socket_id: Arc<RwLock<Option<String>>>,
     processing_pipeline: Arc<ProcessingPipeline>,
-    pub runtime: Arc<Mutex<Runtime>>,
+    pub runtime: Arc<Mutex<Option<Runtime>>>,
     webrtc_ingress: Arc<WebRTCIngress>,
     dash_ingress: Arc<DashIngress>,
 }
+crate::log_drop!(WebSocketIngress);
 
 impl WebSocketIngress {
     pub fn initialize(
@@ -74,8 +75,14 @@ impl WebSocketIngress {
         stream_manager.set_websocket_ingress(ingress)
     }
 
+    pub fn stop(&self) {
+        // close the socket-io client (drops its background thread)
+        if let Some(client) = self.socket.lock().unwrap().take() {
+            let _ = client.disconnect();
+        }
+    }
+
     fn process_payload(
-        stream_id: String,
         payload: Payload,
         processing_pipeline: Arc<ProcessingPipeline>,
     ) {
@@ -111,6 +118,9 @@ impl WebSocketIngress {
 
         debug!("Received frame with {} bytes", frame_task_data.data.len());
 
+        // Get the stream id from the frame task data
+        let stream_id = format!("client_{}_{}", frame_task_data.sfu_client_id.unwrap_or(0), frame_task_data.sfu_tile_index.unwrap_or(0));
+
         processing_pipeline.ingest_data(
             stream_id.clone(),
             0,
@@ -124,16 +134,12 @@ impl WebSocketIngress {
         Arc::clone(&self.socket)
     }
 
-    pub fn get_stream_id(&self) -> String {
-        // Create a stream id based on the socket id
-        format!("ws_{}", self.socket_id.read().unwrap().as_deref().unwrap_or("unknown"))
-    }
-
     pub fn connect(&self) {
         let socket_id_ref = Arc::clone(&self.socket_id);
 
         let socket = match ClientBuilder::new(&self.url)
             .namespace("/")
+            .reconnect_on_disconnect(false)
             // Some basic logging
             .on("disconnect", |_, _| info!("Disconnected from WebSocket server"))
             .on("close", |_, _| info!("Closed WebSocket connection"))
@@ -146,6 +152,7 @@ impl WebSocketIngress {
                 let runtime_clone = Arc::clone(&self.runtime);
                 let webrtc_ingress = Arc::clone(&self.webrtc_ingress);
                 let socket_id_ref = Arc::clone(&socket_id_ref);
+                let socket_ref = Arc::clone(&self.socket);
                 move |payload: Payload, s: RawClient, ack: i32| {
                     // Acknowledge the event
                     let _ = s.ack(ack, "Ok".to_string());
@@ -171,22 +178,23 @@ impl WebSocketIngress {
                     // Now that we are connected to the server, let's create our WebRTC offer.
                     // We must do this in a separate task (async).
                     let webrtc_ingress_clone = webrtc_ingress.clone();
-                    let rt = runtime_clone.lock().unwrap();
-                    let local_sdp = rt.block_on(webrtc_ingress_clone.create_offer());
-                    match local_sdp {
-                        Ok(local_sdp) => {
-                            let offer_payload = serde_json::json!({
-                                "sdp": local_sdp,
-                                "clientId": socket_id.to_string()
-                            });
-                            if let Err(e) = s.emit::<&str, Value>("webrtc_offer", offer_payload) {
-                                error!("Failed to emit webrtc_offer: {:?}", e);
-                            }
-                            //info!("Local SDP: {:#?}", local_sdp);
+                    if let Some(rt) = runtime_clone.lock().unwrap().as_ref() {
+                        let local_sdp = rt.block_on(webrtc_ingress_clone.create_offer(&socket_ref));
+                        match local_sdp {
+                            Ok(local_sdp) => {
+                                let offer_payload = serde_json::json!({
+                                    "sdp": local_sdp,
+                                    "clientId": socket_id.to_string()
+                                });
+                                if let Err(e) = s.emit::<&str, Value>("webrtc_offer", offer_payload) {
+                                    error!("Failed to emit webrtc_offer: {:?}", e);
+                                }
+                                //info!("Local SDP: {:#?}", local_sdp);
 
-                        }
-                        Err(e) => {
-                            error!("Failed to create WebRTC offer: {}", e);
+                            }
+                            Err(e) => {
+                                error!("Failed to create WebRTC offer: {}", e);
+                            }
                         }
                     }
                 }
@@ -227,11 +235,12 @@ impl WebSocketIngress {
                         return;
                     }
 
-                    let rt = runtime_clone.lock().unwrap();
-                    if let Err(e) = rt.block_on(
-                        webrtc_ingress_clone.handle_answer(sdp)
-                    ) {
-                        error!("Error handling WebRTC answer: {}", e);
+                    if let Some(rt) = runtime_clone.lock().unwrap().as_ref() {
+                        if let Err(e) = rt.block_on(
+                            webrtc_ingress_clone.handle_answer(sdp)
+                        ) {
+                            error!("Error handling WebRTC answer: {}", e);
+                        }
                     }
 
                     //info!("WebRTC answer handled");
@@ -301,31 +310,30 @@ impl WebSocketIngress {
                         return;
                     }
 
-                    let rt = runtime_clone.lock().unwrap();
-                    if let Err(e) = rt.block_on(
-                        webrtc_ingress_clone.handle_ice_candidate(candidate, sdp_mid, sdp_mline_index)
-                    ) {
-                        error!("Error handling ICE candidate: {}", e);
+                    if let Some(rt) = runtime_clone.lock().unwrap().as_ref() {
+                        if let Err(e) = rt.block_on(
+                            webrtc_ingress_clone.handle_ice_candidate(candidate, sdp_mid, sdp_mline_index)
+                        ) {
+                            error!("Error handling ICE candidate: {}", e);
+                        }
                     }
 
                     debug!("ICE candidate handled");
                 }
             })
             .on_with_ack("frame:broadcast:ack", {
-                let stream_id = self.get_stream_id();
                 let processing_pipeline = Arc::clone(&self.processing_pipeline);
                 move |payload: Payload, s: RawClient, ack: i32| {
                     let _ = s.ack(ack, "Ok".to_string());
                     debug!("Received frame broadcast with ack");
-                    WebSocketIngress::process_payload(stream_id.clone(), payload, Arc::clone(&processing_pipeline));
+                    WebSocketIngress::process_payload(payload, Arc::clone(&processing_pipeline));
                 }
             })
             .on("frame:broadcast", {
-                let stream_id = self.get_stream_id();
                 let processing_pipeline = Arc::clone(&self.processing_pipeline);
                 move |payload: Payload, _s: RawClient| {
                     debug!("Received frame broadcast without ack");
-                    WebSocketIngress::process_payload(stream_id.clone(), payload, Arc::clone(&processing_pipeline));
+                    WebSocketIngress::process_payload(payload, Arc::clone(&processing_pipeline));
                 }
             })
             .on("mpd::group_id",{

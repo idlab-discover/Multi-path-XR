@@ -73,18 +73,21 @@ impl std::fmt::Debug for DataEntryUrlBox {
 // Implementation of the `Mp4Box` trait for the `DrefBox` struct.
 impl Mp4Box for DrefBox {
     // Returns the box type as a 4-byte array. For `DrefBox`, the type is "dref".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"dref" }
 
     // Calculates the size of the `DrefBox` in bytes.
     // The size includes 8 bytes for the header (4 bytes for size and 4 bytes for type),
     // 4 bytes for the version and flags
     // 4 bytes for the size of all contained `DataEntryUrlBox` entries.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + self.entries.iter().map(|e| e.box_size()).sum::<u32>()
     }
 
     // Writes the `DrefBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and all contained `DataEntryUrlBox` entries into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
@@ -172,12 +175,14 @@ impl DataEntryUrlBox {
     // Calculates the size of the `DataEntryUrlBox` in bytes.
     // The size includes 8 bytes for the header (4 bytes for size and 4 bytes for type),
     // and 4 bytes for the version and flags. No payload is included if the flag is `0x000001`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         12  // 8 bytes header + 4 bytes for version & flags, no payload if flag == 1
     }
 
     // Writes the `DataEntryUrlBox` to the provided buffer.
     // The method serializes the box size, box type, version, and flags into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

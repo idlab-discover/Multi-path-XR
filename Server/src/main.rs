@@ -3,10 +3,11 @@
 use std::{collections::HashMap, sync::Arc, time};
 use clap::{Parser, ValueEnum};
 use metrics::{get_all_interfaces, Metrics, MetricsBuilder};
-use tokio::{runtime, sync::oneshot, time as tokioTime};
+use tokio::{runtime, sync::oneshot};
 use tracing::{debug, error, info, instrument, level_filters::LevelFilter};
 use tracing_subscriber::{layer::SubscriberExt, Layer};
 use rayon::ThreadPoolBuilder;
+use shared_networking::tcp::{build_tcp_listener, TcpListenerOpts};
 
 mod handlers;
 mod services;
@@ -92,6 +93,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
 
+    #[cfg(feature = "console-tracing")]
+    info!("Console tracing enabled.");
+
 
     info!("{:?}", args);
 
@@ -100,7 +104,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .thread_name_fn(|| {
             static ATOMIC_WEBRTC_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
             let id = ATOMIC_WEBRTC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            format!("MAIN_R w-{}", id)
+            format!("MAIN_R w-{id}")
         })
         .enable_all()
         .build().unwrap();
@@ -109,7 +113,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize thread pool
     let thread_pool = Arc::new(
         ThreadPoolBuilder::new()
-            .thread_name(|i| format!("Tpool w-{}", i+1))
+            .thread_name(|i| format!("TP w-{}", i+1))
             .num_threads(args.threads)
             .build()
             .expect("Failed to build thread pool"),
@@ -156,7 +160,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let stream_manager_clone = stream_manager_clone.clone();
                 local_runtime.spawn(async move {
                     if let Some(io) = stream_manager_clone.get_socket_io() {
-                        let _ = io.emit("mpd::group_id", &group_id);
+                        let _ = io.emit("mpd::group_id", &group_id).await;
                     } else {
                         error!("Socket IO is not initialized");
                     }
@@ -195,25 +199,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     runtime.block_on(async move {
         let addr: std::net::SocketAddr = format!("0.0.0.0:{}", args.port).parse().unwrap();
-        let sock = socket2::Socket::new(
-            match addr {
-                std::net::SocketAddr::V4(_) => socket2::Domain::IPV4,
-                std::net::SocketAddr::V6(_) => socket2::Domain::IPV6,
-            },
-            socket2::Type::STREAM, // Will become SOCK_CLOEXEC internally on Linux
-            None,
-        ).unwrap();
+        let std_listener = match build_tcp_listener(TcpListenerOpts {
+            addr,
+            backlog: 1024,
+            reuse_port: true,
+            nonblocking: true,
+            //..Default::default()
+        }) {
+            Ok(listener) => listener,
+            Err(e) => {
+                error!("Failed to build TCP listener: {}", e);
+                return;
+            }
+        };
 
-        sock.set_reuse_address(true).unwrap();
-        #[cfg(unix)]
-        sock.set_reuse_port(true).unwrap();
-        sock.set_nonblocking(true).unwrap();
-        sock.bind(&addr.into()).unwrap();
-        sock.listen(1024).unwrap();
+        let listener = tokio::net::TcpListener::from_std(std_listener).unwrap();
 
-        let listener = tokio::net::TcpListener::from_std(sock.into()).unwrap();
-
-        // let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", args.port)).await.unwrap();
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -230,10 +231,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 #[instrument(skip_all)]
 async fn update_metrics_loop(metrics: Arc<Metrics>) {
-    let mut interval = tokioTime::interval(tokioTime::Duration::from_secs(1));
+    // Tunables
+    const PERIOD: tokio::time::Duration = tokio::time::Duration::from_secs(1);
+    const CATCHUP_FRACTION: f64 = 0.75;          // shave up to 75% to catch up
+    const SKIP_THRESHOLD: tokio::time::Duration = tokio::time::Duration::from_millis(950); // only skip if ≥0.95s late
+
+    // Anchor to a fixed grid
+    let start = tokio::time::Instant::now();
+    let mut tick_idx: u64 = 1;
+
+
     loop {
+        // Do the work for this tick
         metrics.update();
         debug!("Metrics updated");
-        interval.tick().await;
+
+        // ---- Drift-resistant timing with bounded catch-up ----
+        let now = tokio::time::Instant::now();
+        let target = start + PERIOD.saturating_mul(tick_idx as u32);
+
+        if now < target {
+            // Early: sleep exactly to the grid time
+            tokio::time::sleep_until(target).await;
+            tick_idx += 1;
+            continue;
+        }
+
+        // We're late relative to the grid
+        let lateness = now.saturating_duration_since(target);
+
+        if lateness < SKIP_THRESHOLD {
+            // Prefer not to skip: shorten next sleep (bounded)
+            let catchup_cap = PERIOD.mul_f64(CATCHUP_FRACTION);
+            let shave = if lateness > catchup_cap { catchup_cap } else { lateness };
+            let sleep_dur = PERIOD.saturating_sub(shave);
+
+            if !sleep_dur.is_zero() {
+                tokio::time::sleep(sleep_dur).await;
+            }
+            tick_idx += 1;
+        } else {
+            // Very late (~full second): snap to current grid slot (single skip)
+            let elapsed = now.duration_since(start);
+            let full_ticks = (elapsed.as_nanos() / PERIOD.as_nanos()) as u64;
+            tick_idx = full_ticks + 1;
+            // no sleep; loop again
+        }
     }
 }

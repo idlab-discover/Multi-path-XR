@@ -40,6 +40,7 @@ impl std::fmt::Debug for MinfBox {
 // Implementation of the `Mp4Box` trait for the `MinfBox` struct.
 impl Mp4Box for MinfBox {
     // Returns the box type as a 4-byte array. For `MinfBox`, the type is "minf".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"minf" }
 
     // Calculates the size of the `MinfBox` in bytes.
@@ -48,6 +49,7 @@ impl Mp4Box for MinfBox {
     // - The size of the `VmhdBox` or 'SmhdBox'.
     // - The size of the `DinfBox`.
     // - The size of the `StblBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 
         self.vmhd.as_ref().map_or(0, |b| b.box_size()) +
@@ -59,6 +61,7 @@ impl Mp4Box for MinfBox {
     // Writes the `MinfBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `VmhdBox` or 'SmhdBox',
     // `DinfBox`, and `StblBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
@@ -138,7 +141,7 @@ impl Mp4Box for MinfBox {
                     offset += consumed;
                 }
                 _ => {
-                    return Err(format!("Unknown box type in MINF: {:?}", box_type));
+                    return Err(format!("Unknown box type in MINF: {box_type:?}"));
                 }
             }
         }

@@ -24,3 +24,4 @@ circular-buffer.workspace = true
 chrono.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json"] }
 polars.workspace = true
+dashmap.workspace = true

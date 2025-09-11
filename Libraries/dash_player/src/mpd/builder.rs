@@ -145,10 +145,10 @@ impl MpdBuilder {
             format!("PT{}S", self.time_shift_buffer_depth).as_str(),
         ));
         if let Some(v) = self.minimum_update_period {
-            mpd.push_attribute(("minimumUpdatePeriod", format!("PT{}S", v).as_str()));
+            mpd.push_attribute(("minimumUpdatePeriod", format!("PT{v}S").as_str()));
         }
         if let Some(v) = self.suggested_presentation_delay {
-            mpd.push_attribute(("suggestedPresentationDelay", format!("PT{}S", v).as_str()));
+            mpd.push_attribute(("suggestedPresentationDelay", format!("PT{v}S").as_str()));
         }
 
         writer.write_event(Event::Start(mpd))?;

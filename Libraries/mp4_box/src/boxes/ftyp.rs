@@ -53,6 +53,7 @@ impl std::fmt::Debug for FtypBox {
 // Implementation of the `Mp4Box` trait for the `FtypBox` struct.
 impl Mp4Box for FtypBox {
     // Returns the box type as a 4-byte array. For `FtypBox`, the type is "ftyp".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"ftyp" }
 
     // Calculates the size of the `FtypBox` in bytes.
@@ -61,6 +62,7 @@ impl Mp4Box for FtypBox {
     // - 4 bytes for the `major_brand`.
     // - 4 bytes for the `minor_version`.
     // - 4 bytes for each entry in the `compatible_brands` vector.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + (4 * self.compatible_brands.len() as u32)
     }
@@ -68,6 +70,7 @@ impl Mp4Box for FtypBox {
     // Writes the `FtypBox` to the provided buffer.
     // The method serializes the box size, box type, `major_brand`, `minor_version`,
     // and all entries in the `compatible_brands` vector into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

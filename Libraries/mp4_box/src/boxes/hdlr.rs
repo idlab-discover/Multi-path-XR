@@ -47,6 +47,7 @@ impl std::fmt::Debug for HdlrBox {
 // Implementation of the `Mp4Box` trait for the `HdlrBox` struct.
 impl Mp4Box for HdlrBox {
     // Returns the box type as a 4-byte array. For `HdlrBox`, the type is "hdlr".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"hdlr" }
 
     // Calculates the size of the `HdlrBox` in bytes.
@@ -57,6 +58,7 @@ impl Mp4Box for HdlrBox {
     // - 4 bytes for the `handler_type` field.
     // - 12 bytes for the `reserved` array (3 x 4 bytes).
     // - The length of the `name` field plus 1 byte for the null-terminator.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + 4 + 12 + (self.name.len() as u32 + 1)  // +1 for null-terminator
     }
@@ -64,6 +66,7 @@ impl Mp4Box for HdlrBox {
     // Writes the `HdlrBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, `pre_defined`,
     // `handler_type`, `reserved` array, and the `name` field into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

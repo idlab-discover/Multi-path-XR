@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Viewport-Aware Hybrid Broadcast-Unicast streaming for Volumetric Video</title>
+  <!-- Chart.js (free, common, minified) -->
+  <script src="chart.umd.min.js"></script>
+  <script src="system-overview.js"></script>
+  <link rel="stylesheet" href="demo.css" />
+  <link rel="stylesheet" href="system-overview.css">
+</head>
+<body>
+  <header>
+    <h1>Viewport-Aware Hybrid Broadcast-Unicast streaming</h1>
+    <div class="status" id="status">Ready.</div>
+  </header>
+
+  <main>
+    <aside>
+      <div class="group" style="display: none;">
+        <h2>Target</h2>
+        <div class="row">
+          <label for="nodeId">Node ID</label>
+          <input id="nodeId" type="text" value="r3" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="iface">Interface</label>
+          <input id="iface" type="text" value="r3-eth1" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="endpoint">Controller endpoint</label>
+          <input id="endpoint" type="url" value="/update_network_conditions" />
+        </div>
+        <div class="help">
+          Will POST JSON: { node_id, bandwidth, latency, loss, interface } to the controller.
+        </div>
+      </div>
+
+      <div class="group" style="text-align: center; font-size: 1.2em;">
+        Real-time volumetric video is delivered through a hybrid broadcast-unicast setup. Broadcast provides a common base, while unicast adds viewer-specific enhancements for smooth, efficient experiences.
+      </div>
+
+      <div class="group">
+        <h2>Unicast traffic control</h2>
+        <label>Bandwidth (Mbps)</label>
+        <div class="slider-row">
+          <input id="bw" type="range" min="1" max="200" step="1" value="200"/>
+          <div class="value-chip"><span id="bwVal">200</span> Mbps</div>
+        </div>
+
+        <label>Latency (ms)</label>
+        <div class="slider-row">
+          <input id="lat" type="range" min="0" max="50" step="1" value="0"/>
+          <div class="value-chip"><span id="latVal">0</span> ms</div>
+        </div>
+
+        <label>Loss (%)</label>
+        <div class="slider-row">
+          <input id="loss" type="range" min="0" max="20" step="0.1" value="0.0"/>
+          <div class="value-chip"><span id="lossVal">0.0</span> %</div>
+        </div>
+
+        <div class="actions">
+          <button id="apply">Apply</button>
+          <button id="reset" class="secondary">Reset</button>
+        </div>
+        <!--<div class="help">Tip: values are applied to the interface on the agent via Socket.IO through the controller.</div>-->
+      </div>
+      <div class="group" style="display: flex; flex-direction: column; align-items: center; gap: 24px; background-color: rgb(255, 255, 255); padding: 24px;">
+        <img src="./SPIRIT.png" alt="SPIRIT project logo" style="max-width: 100%; object-fit: contain; padding: 0px 24px;">
+        <img src="./UGent.png" alt="Ghent University logo" style="max-width: 100%; object-fit: contain; padding: 0px 24px;">
+        <img src="./imec.jpg" alt="imec logo" style="max-width: 100%; object-fit: contain; padding: 0px 24px;">
+      </div>
+    </aside>
+
+    <section class="content">
+      <div class="card g1">
+        <h3>Displayed points per object</h3>
+        <canvas id="pointsChart"></canvas>
+        <!--<div class="tiny">Typical 15k-100k points per object, varies with viewport.</div>-->
+      </div>
+      <div class="card g2">
+        <h3>Throughput per protocol</h3>
+        <canvas id="bwChart"></canvas>
+        <!--<div class="tiny">Unicasts enhancements are enabled when the object is in view.</div>-->
+      </div>
+      <div class="card g3">
+        <h3>Latency</h3>
+        <canvas id="latencyChart"></canvas>
+        <!--<div class="tiny">Target latency &lt; 40 ms, 30 FPS sustained.</div>-->
+      </div>
+      <div class="card g4">
+        <h3>FPS</h3>
+        <canvas id="fpsChart"></canvas>
+        <!--<div class="tiny">Target latency &lt; 40 ms, 30 FPS sustained.</div>-->
+      </div>
+      <!--div class="card g4">
+        <h3>System resources</h3>
+        <canvas id="sysChart"></canvas>
+        <!--<div class="tiny">CPU &amp; Memory.</div>-->
+      </div-->
+      <div class="card g5">
+        <h3>System overview</h3>
+        <div class="netwrap">
+          <div id="netStage" style="position:relative; height:275px;"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="demo.js"></script>
+
+  <script>
+    window.addEventListener('DOMContentLoaded', () => {
+      const beamPulsePeriodMs = 1500;
+
+      const broadcastSpeed = 600;
+      const broadcastSize = 100;
+
+      const unicastClientToServerSpeed = 1400;
+      const unicastServerToClientSpeed = 1000;
+      const unicastClientToServerSize = 10;
+      const unicastServerToClientSize = 100;
+
+      // Define your topology (positions in %), edges, and policies
+      const graph = {
+        mount: '#netStage',        // <— use your container id here
+        nodes: {
+          srv:   { x: 10, y: 50, type: 'server',  icon: 'server'  },
+          antenna1: { x: 30, y: 25, type: 'split',   icon: 'antenna' },
+          antenna2: { x: 83.5, y: 18, type: 'split',   icon: 'antenna' },
+          antenna3: { x: 83.5, y: 43, type: 'split',   icon: 'antenna' },
+          antenna4: { x: 83.5, y: 68, type: 'split',   icon: 'antenna' },
+          router1: { x: 30, y: 75, type: 'split',   icon: 'switch' },
+          //router2: { x: 46, y: 75, type: 'split',   icon: 'invisible' },
+          c1:    { x: 85, y: 25, type: 'client',  icon: 'vr'      },
+          c2:    { x: 85, y: 50, type: 'client',  icon: 'vr'      },
+          c3:    { x: 85, y: 75, type: 'client',  icon: 'vr'      },
+        },
+        edges: [
+          // Broadcast
+          { id: 'e_srv_antenna1', from: 'srv',   to: 'antenna1', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: false }, curvature: -0.6 },
+          { id: 'e_antenna1_antenna2', from: 'antenna1',   to: 'antenna2', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: true }, curvature: -0.3 },
+          { id: 'e_antenna1_antenna3', from: 'antenna1',   to: 'antenna3', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: true }, curvature: -0.2 },
+          { id: 'e_antenna1_antenna4', from: 'antenna1',   to: 'antenna4', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: true }, curvature: -0.1 },
+          { id: 'e_antenna2_c1', from: 'antenna2', to: 'c1', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: false }, curvature: -0.1 },
+          { id: 'e_antenna3_c2', from: 'antenna3', to: 'c2', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: false }, curvature: -0.1 },
+          { id: 'e_antenna4_c3', from: 'antenna4', to: 'c3', kind: 'broadcast', style: { color: '#67AB9F88', width: 3, dashed: false }, curvature: -0.1 },
+          // Unicast
+          { id: 'e_srv_router1', from: 'srv', to: 'router1', kind: 'unicast', style: { color: '#E6B93E88', width: 3, dashed: false }, curvature: 0.6 },
+          //{ id: 'e_router1_router2', from: 'router1', to: 'router2', kind: 'unicast', style: { color: '#E6B93E88', width: 3, dashed: false }, curvature: 0.08 },
+          { id: 'e_t_c1', from: 'router1', to: 'c1', kind: 'unicast', style: { color: '#E6B93E88', width: 3, dashed: false }, curvature: 0.1 },
+          { id: 'e_t_c2', from: 'router1', to: 'c2', kind: 'unicast', style: { color: '#E6B93E88', width: 3, dashed: false }, curvature: 0.2 },
+          { id: 'e_t_c3', from: 'router1', to: 'c3', kind: 'unicast', style: { color: '#E6B93E88', width: 3, dashed: false }, curvature: 0.3 },
+        ],
+        // beam routing per node
+        policies: {
+          // sensible defaults
+          '*': ({ node, nodeId, beam, incoming, neighbors }) => {
+            // clients always absorb (both broadcast + unicast)
+            if (node.type === 'client') return 'absorb';
+
+            if (beam.tag === 'broadcast') {
+              // broadcast fans out to all except the incoming branch
+              return 'forwardAll';
+            }
+
+            if (beam.tag === 'unicast' && node.type === 'split') {
+              if (incoming === 'router1') return ['c1', 'c2', 'c3'];
+              if (incoming === 'router2') return ['srv'];
+              if (incoming === 'srv')     return 'forwardAll';
+              if (incoming === 'c1') return ['router1', 'srv'];
+              return 'absorb';
+            }
+
+            // When an incoming beam reaches a server
+            if (node.type == 'server') {
+              // Let's overwrite the beam speed and size
+              if (beam.tag === 'unicast') {
+                beam.speed = unicastServerToClientSpeed;
+                beam.length = unicastServerToClientSize;
+              }
+            }
+
+            // default for unicast (if not overridden below)
+            return 'bounce';
+          },
+        },
+        onReady(net) {
+          const broadcastGradientMatrix = [
+            ['#6DFFCE', '#6DFFCE'],
+            ['#168A62', '#168A62'],
+            ['#00FFBD', '#00FFBD'],
+            ['#377565', '#377565'],
+            ['#AEEBDC', '#AEEBDC'],
+            ['#50756E', '#50756E'],
+          ];
+          let broadcastGradientIdx = 0; // circular index
+
+          const unicastGradientMatrix = [
+            ['#FFC94B', '#FFC94B'],
+            ['#FFF2B0', '#FFF2B0'],
+            ['#D4A72A', '#D4A72A'],
+            ['#B3A072', '#B3A072'],
+            ['#B3860D', '#B3860D'],
+            ['#FFEFC9', '#FFEFC9'],
+          ];
+          let unicastGradientIdx = 0; // circular index
+
+          setTimeout(() => {
+              setInterval(() => {
+              // BROADCAST: server → antenna1 → fan out (every period)
+              const broadcastGradient = broadcastGradientMatrix[broadcastGradientIdx];
+              broadcastGradientIdx = (broadcastGradientIdx + 1) % broadcastGradientMatrix.length; // cycle
+              net.addBeam({
+                edge: 'e_srv_antenna1',
+                dir: +1,
+                speed: broadcastSpeed,
+                length: broadcastSize,
+                gradient: broadcastGradient,
+                tag: 'broadcast',
+                hops: 8,
+                widthFactor: 2.5,
+              });
+            }, beamPulsePeriodMs);
+          }, 200);
+
+          setInterval(() => {
+            // UNICAST: each client → router (dir -1), then policies take over
+            const unicastGradient = unicastGradientMatrix[unicastGradientIdx];
+            unicastGradientIdx = (unicastGradientIdx + 1) % unicastGradientMatrix.length; // cycle
+            ['c1', 'c2', 'c3'].forEach((cid, i) => {
+              const edgeId = `e_t_${cid}`; // e_t_c1 / e_t_c2 / e_t_c3
+              // Get random number between 0 and 20
+              const randomDelayMs = Math.floor(Math.random() * 100);
+              setTimeout(() => {
+                net.addBeam({
+                  edge: edgeId,
+                  dir: -1,           // move toward router
+                  speed: unicastClientToServerSpeed,
+                  length: unicastClientToServerSize,
+                  gradient: unicastGradient,      // unicast gradient
+                  tag: 'unicast',
+                  hops: 8,
+                  widthFactor: 2.5,
+                });
+              }, randomDelayMs);
+            });
+          }, beamPulsePeriodMs);
+
+
+        },
+      };
+
+      const viz = NetViz.mount(graph.mount, graph);
+      window._netViz = viz; // for debugging in console
+    });
+  </script>
+
+</body>
+</html>

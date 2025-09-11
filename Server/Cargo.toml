@@ -41,6 +41,7 @@ bytes.workspace = true
 rbase64.workspace = true
 async-trait.workspace = true
 futures.workspace = true
+shared_networking.workspace = true
 shared_utils.workspace = true
 dash_player.workspace = true
 mp4_box.workspace = true

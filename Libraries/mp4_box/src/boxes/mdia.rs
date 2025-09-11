@@ -35,6 +35,7 @@ impl std::fmt::Debug for MdiaBox {
 // Implementation of the `Mp4Box` trait for the `MdiaBox` struct.
 impl Mp4Box for MdiaBox {
     // Returns the box type as a 4-byte array. For `MdiaBox`, the type is "mdia".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mdia" }
 
     // Calculates the size of the `MdiaBox` in bytes.
@@ -43,6 +44,7 @@ impl Mp4Box for MdiaBox {
     // - The size of the `MdhdBox`.
     // - The size of the `HdlrBox`.
     // - The size of the `MinfBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.mdhd.box_size() + self.hdlr.box_size() + self.minf.box_size()
     }
@@ -50,6 +52,7 @@ impl Mp4Box for MdiaBox {
     // Writes the `MdiaBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `MdhdBox`,
     // `HdlrBox`, and `MinfBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

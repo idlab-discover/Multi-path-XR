@@ -40,7 +40,7 @@ pub fn decode_ply(data: Vec<u8>) -> Result<PointCloudData, Box<dyn std::error::E
                     }
                 };
 
-                pcd.points.extend(vertex_list);
+                pcd.points.extend(vertex_list); // TODO: could we use extend_from_slice instead? For performance?
             }
             _ => {
                 // Ignore other elements for now

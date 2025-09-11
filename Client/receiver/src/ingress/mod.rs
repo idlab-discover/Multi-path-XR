@@ -13,6 +13,7 @@ pub struct Ingress {
     processing_pipeline: Arc<ProcessingPipeline>,
     storage: Arc<Storage>,
 }
+crate::log_drop!(Ingress);
 
 impl Ingress {
     pub fn new(thread_count: usize, disable_parser: bool) -> Self {
@@ -47,6 +48,11 @@ impl Ingress {
             self.stream_manager.clone(),
             self.processing_pipeline.clone(),
         );
+    }
+
+    pub fn stop(&self) {
+        self.stream_manager.stop();
+        self.processing_pipeline.stop();
     }
 
     pub fn get_stream_manager(&self) -> Arc<StreamManager> {

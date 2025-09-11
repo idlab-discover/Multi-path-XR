@@ -41,6 +41,7 @@ impl std::fmt::Debug for StblBox {
 // Implementation of the `Mp4Box` trait for the `StblBox` struct.
 impl Mp4Box for StblBox {
     // Returns the box type as a 4-byte array. For `StblBox`, the type is "stbl".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stbl" }
 
     // Calculates the size of the `StblBox` in bytes.
@@ -55,6 +56,7 @@ impl Mp4Box for StblBox {
     //   - `StszBox`
     //   - `StcoBox` (optional)
     //   - `Co64Box` (optional)
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.stsd.box_size()
           + self.stts.box_size()
@@ -69,6 +71,7 @@ impl Mp4Box for StblBox {
     // Writes the `StblBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `StsdBox`,
     // `SttsBox`, `StscBox`, `StszBox`, and `StcoBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

@@ -2,6 +2,7 @@ use axum::extract::{Json, Query, State};
 use tracing::instrument;
 use crate::types::{AppState, EgressProtocolType};
 use serde::{de, Deserialize, Deserializer, Serialize};
+use std::str::FromStr;
 
 fn deserialize_csv_u8<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
 where
@@ -20,14 +21,41 @@ where
     }
 }
 
+pub fn deserialize_f32_array3_semicolon<'de, D>(deserializer: D) -> Result<Option<[f32; 3]>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    let parts: Vec<f32> = s
+        .split(';')
+        .map(|x| {
+            f32::from_str(x.trim()).map_err(|_| {
+                de::Error::custom(format!("invalid float: {}", x.trim()))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if parts.len() != 3 {
+        return Err(de::Error::custom(format!(
+            "expected exactly 3 elements, got {}",
+            parts.len()
+        )));
+    }
+
+    Ok(Some([parts[0], parts[1], parts[2]]))
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UpdateStreamSettingsRequest {
     pub stream_id: String,
     pub priority: Option<u8>,
     pub egress_protocols: Option<Vec<EgressProtocolType>>,
     pub process_incoming_frames: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_f32_array3_semicolon")]
     pub position: Option<[f32; 3]>,
+    #[serde(default, deserialize_with = "deserialize_f32_array3_semicolon")]
     pub rotation: Option<[f32; 3]>,
+    #[serde(default, deserialize_with = "deserialize_f32_array3_semicolon")]
     pub scale: Option<[f32; 3]>,
     pub presentation_time_offset: Option<u64>,
     pub decode_bypass: Option<bool>,

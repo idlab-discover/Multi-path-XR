@@ -5,6 +5,9 @@ import pandas as pd
 from datetime import datetime
 
 PROMETHEUS_URL = "http://0.0.0.0:9090"
+PERIOD_NS = 1_000_000_000          # 1 second
+CATCHUP_FRACTION = 0.75            # shave up to 75% of a period to catch up
+SKIP_THRESHOLD_NS = 950_000_000    # only skip if ≥ 0.95 s late
 
 def fetch_all_metrics():
     """
@@ -49,6 +52,10 @@ def main():
 
     # If you only want certain metrics, filter them here
     # all_metrics = [m for m in all_metrics if m.startswith("cpu_") or m in ("up", "memory_usage")]
+
+    # Fixed grid anchored at start
+    start_ns = time.monotonic_ns()
+    tick_idx = 1  # next tick is 1 * PERIOD after start
 
     while True:
         timestamp = datetime.now()
@@ -106,8 +113,30 @@ def main():
 
         print(f"[{timestamp}] Updated {len(step_data)} instances.")
 
-        # Sleep for 1 second before next iteration
-        time.sleep(1)
+        # ---- Drift-resistant timing with bounded catch-up ----
+        now = time.monotonic_ns()
+        target = start_ns + tick_idx * PERIOD_NS
+        lateness = now - target  # >0 if late, <0 if early
+
+        if lateness <= 0:
+            # Early: sleep exactly until target
+            time.sleep((-lateness) / 1e9)
+            tick_idx += 1
+            continue
+
+        # Late but prefer not to skip; shorten the next sleep
+        if lateness < SKIP_THRESHOLD_NS:
+            catchup_cap = int(PERIOD_NS * CATCHUP_FRACTION)
+            shave = min(lateness, catchup_cap)
+            sleep_ns = PERIOD_NS - shave
+            if sleep_ns > 0:
+                time.sleep(sleep_ns / 1e9)
+            tick_idx += 1
+            continue
+
+        # Very late (≥ threshold): snap to current grid slot (skip)
+        tick_idx = int((now - start_ns) // PERIOD_NS) + 1
+        # no sleep here; immediately loop and measure again
 
 if __name__ == "__main__":
     main()

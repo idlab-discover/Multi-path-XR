@@ -69,8 +69,13 @@ if [[ "$HEADLESS" == true ]]; then
     fi
 
 else
+    # Choose debug or release binary
+    if [[ "$RELEASE_MODE" == "true" ]]; then
+        EXECUTABLE="./pc_renderer_unity/Build/release.x86_64"
+    else
+        EXECUTABLE="./pc_renderer_unity/Build/debug.x86_64"
+    fi
     # Check if the executable exists
-    EXECUTABLE="./pc_renderer_unity/Build/debug.x86_64"
     if [[ ! -f "$EXECUTABLE" ]]; then
         echo "Error: Executable $EXECUTABLE not found."
         exit 1

@@ -26,8 +26,10 @@ impl std::fmt::Debug for EdtsBox {
 
 // Implementation of the `Mp4Box` trait for the `EdtsBox` struct.
 impl Mp4Box for EdtsBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"edts" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let mut size = 8; // header
         if let Some(ref elst) = self.elst {
@@ -36,6 +38,7 @@ impl Mp4Box for EdtsBox {
         size
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

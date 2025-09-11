@@ -38,6 +38,7 @@ impl std::fmt::Debug for TrakBox {
 // Implementation of the `Mp4Box` trait for the `TrakBox` struct.
 impl Mp4Box for TrakBox {
     // Returns the box type as a 4-byte array. For `TrakBox`, the type is "trak".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"trak" }
 
     // Calculates the size of the `TrakBox` in bytes.
@@ -45,6 +46,7 @@ impl Mp4Box for TrakBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - The size of the `TkhdBox`.
     // - The size of the `MdiaBox`.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let mut size = 8; // header
         size += self.tkhd.box_size();
@@ -60,6 +62,7 @@ impl Mp4Box for TrakBox {
 
     // Writes the `TrakBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of the `TkhdBox` and `MdiaBox` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

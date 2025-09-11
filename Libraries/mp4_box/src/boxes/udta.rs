@@ -23,12 +23,15 @@ impl std::fmt::Debug for UdtaBox {
 }
 
 impl Mp4Box for UdtaBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"udta" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.meta.as_ref().map_or(0, |m| m.box_size())
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
@@ -61,7 +64,7 @@ impl Mp4Box for UdtaBox {
                 meta = Some(meta_box);
                 // offset += consumed;
             } else {
-                return Err(format!("Unexpected box in UDTA: {:?}", box_type));
+                return Err(format!("Unexpected box in UDTA: {box_type:?}"));
             }
         }
 

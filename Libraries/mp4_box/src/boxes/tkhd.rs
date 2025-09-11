@@ -65,6 +65,7 @@ impl std::fmt::Debug for TkhdBox {
 
 impl Mp4Box for TkhdBox {
     // Returns the box type as a 4-byte array. For `TkhdBox`, the type is "tkhd".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"tkhd" }
 
     // Calculates the size of the `TkhdBox` in bytes.
@@ -81,6 +82,7 @@ impl Mp4Box for TkhdBox {
     // - 2 bytes for reserved field.
     // - 36 bytes for the unity matrix (identity transform).
     // - 4 bytes each for width and height.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let time_fields = if self.version == 1 {
             8 + 8 + 4 + 4 + 8
@@ -92,6 +94,7 @@ impl Mp4Box for TkhdBox {
 
     // Writes the `TkhdBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and all fields into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes()); // box size (4 bytes)
         buffer.extend_from_slice(&self.box_type()); // box type (4 bytes)

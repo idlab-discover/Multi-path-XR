@@ -64,7 +64,7 @@ pub async fn start_transmission_job(
     let stream_id = params_clone
         .stream_id
         .clone()
-        .unwrap_or_else(|| format!("job_{}", job_id));
+        .unwrap_or_else(|| format!("job_{job_id}"));
 
     // Update stream settings based on job parameters
     let mut settings = app_state.stream_manager.get_stream_settings(&stream_id);
@@ -81,21 +81,28 @@ pub async fn start_transmission_job(
         let ply_folder = params_clone.ply_folder.clone().unwrap_or_default();
 
         let job_id_clone = job_id.clone();
-        thread::spawn(move || {
-            run_dataset_job(
-                job_id_clone,
-                stream_id.clone(),
-                dataset,
-                ply_folder,
-                params_clone,
-                processing_pipeline,
-                stream_manager,
-                rx
-            )
-        });
+        let thread_name = format!("dataset_job_{job_id_clone}");
+        thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
+                run_dataset_job(
+                    job_id_clone,
+                    stream_id.clone(),
+                    dataset,
+                    ply_folder,
+                    params_clone,
+                    processing_pipeline,
+                    stream_manager,
+                    rx
+                )
+            })
+            .expect("Failed to spawn dataset job thread");
     } else {
         let job_id_clone = job_id.clone();
-        thread::spawn(move || {
+        let thread_name = format!("generator_job_{job_id_clone}");
+        thread::Builder::new()
+            .name(thread_name)
+            .spawn(move || {
             run_generator_job(
                 job_id_clone,
                 stream_id.clone(),
@@ -104,12 +111,13 @@ pub async fn start_transmission_job(
                 stream_manager,
                 rx,
             )
-        }); 
+            })
+            .expect("Failed to spawn generator job thread");
     }
 
     Json(JobResponse {
         id: job_id.clone(),
-        message: format!("Job started with ID {}", job_id),
+        message: format!("Job started with ID {job_id}"),
         params: Some(params),
     })
 }
@@ -126,7 +134,7 @@ fn run_dataset_job(
     stream_manager: Arc<StreamManager>,
     mut stop_signal: oneshot::Receiver<()>,
 ) {
-    info!("Starting dataset job with ID {}", job_id);
+    info!("Starting dataset job with ID {} and stream ID {}", job_id, stream_id);
 
     let fps = params.fps;
     let interval = 1_000_000 / fps as u64; // In microseconds
@@ -181,7 +189,7 @@ fn run_dataset_job(
 
         // Get the current file by modulus if looping is enabled
         let file = &pc_files[index % pc_files.len()];
-        let filepath = format!("../Datasets/{}/{}/{}", dataset, pc_folder, file);
+        let filepath = format!("../Datasets/{dataset}/{pc_folder}/{file}");
 
         // Calculate the emit time
         let emit_time = start_time + Duration::from_micros(interval * index as u64);
@@ -223,6 +231,8 @@ fn load_and_process_frame(
     stream_manager: Arc<StreamManager>,
     stream_id: String,
 ) {
+    // TODO: add a simple cache mechanism to avoid reloading the same file multiple times
+    // Either a cache with a fixed size and some eviction policy, or a circular buffer per job. Whichever is the fastest and least performance-impacting.
     // Load the PLY file
     let raw_data = match std::fs::read(&filepath) {
         Ok(data) => data,

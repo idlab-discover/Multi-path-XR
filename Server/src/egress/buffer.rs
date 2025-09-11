@@ -7,7 +7,7 @@ use mp4_box::writer::{create_media_segment, Mp4StreamConfig};
 use shared_utils::types::{FrameTaskData, PointCloudData};
 use circular_buffer::CircularBuffer;
 use bytes::Bytes;
-use tokio::time::sleep;
+use tokio::{sync::Notify, time::sleep};
 use tracing::{debug, instrument};
 
 use super::egress_common::{push_preencoded_frame_data, EgressCommonMetrics, EgressProtocol};
@@ -29,6 +29,7 @@ pub struct BufferEgress {
     max_number_of_points: Arc<Mutex<u64>>,
     egress_metrics: Arc<EgressCommonMetrics>,
     circular_storages: Arc<Mutex<HashMap<String, (CircularBuffer<60, BufferFrame>, u64, Mp4StreamConfig)>>>,
+    notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
     mpd_manager: Arc<MpdManager>,
 }
 
@@ -51,6 +52,7 @@ impl BufferEgress {
             max_number_of_points: Arc::new(Mutex::new(100000)),
             egress_metrics: Arc::new(EgressCommonMetrics::new()),
             circular_storages: Arc::new(Mutex::new(HashMap::new())),
+            notifiers: Arc::new(Mutex::new(HashMap::new())),
             mpd_manager
         });
 
@@ -64,6 +66,11 @@ impl BufferEgress {
 
     pub async fn get_frame(&self, stream_id: &str, index: u64, timeout: Duration) -> Option<BufferFrame> {
         let deadline = tokio::time::Instant::now() + timeout;
+        // per-stream notifier (create if missing)
+        let notify = {
+            let mut ns = self.notifiers.lock().unwrap();
+            ns.entry(stream_id.to_string()).or_insert_with(|| Arc::new(Notify::new())).clone()
+        };
         loop {
             {
                 let storages = self.circular_storages.lock().unwrap();
@@ -88,6 +95,8 @@ impl BufferEgress {
                             return None;
                         }
                     }
+
+                    // TODO: we could also predict if the frame will ever be added within the given timeout period.
                 } else {
                     return None;
                 }
@@ -99,10 +108,27 @@ impl BufferEgress {
                 return None;
             }
 
-            // Sleep for a short duration before checking again
-            sleep(Duration::from_millis(1)).await;
+            // Wait until a new frame is pushed or until near the deadline
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() { return None; }
+            // Small safety cap: wake periodically at ≤5 ms to re-check deadline
+            let cap = Duration::from_millis(5);
+            tokio::select! {
+                _ = notify.notified() => {},
+                _ = sleep(remaining.min(cap)) => {},
+            }
 
         }
+    }
+
+    pub async fn get_latest_frame_index(&self, stream_id: &str) -> Option<u64> {
+        let storages = self.circular_storages.lock().unwrap();
+        if let Some((storage, _, _)) = storages.get(stream_id) {
+            if let Some(frame) = storage.back() {
+                return Some(frame.index);
+            }
+        }
+        None
     }
 
     #[allow(dead_code)]
@@ -261,7 +287,7 @@ impl EgressProtocol for BufferEgress {
             let decode_time = frame.presentation_time * config.timescale as u64 / 1000;
             let segment_bytes = create_media_segment(
                 config,
-                &encoded, // Use the encoded Bytes directly
+                encoded, // Use the encoded Bytes directly
                 *index as u32,
                 decode_time,
             );
@@ -269,7 +295,7 @@ impl EgressProtocol for BufferEgress {
             // Construct the buffer frame
             let buffer_frame = BufferFrame {
                 index: *index,
-                data: segment_bytes, // TODO: instead of encoded, we should use the m4s file
+                data: segment_bytes,
             };
         
             // Increment the index and store the frame
@@ -277,6 +303,11 @@ impl EgressProtocol for BufferEgress {
             buffer.push_back(buffer_frame);
         
             debug!("Stored frame in buffer of stream {} at index {}", stream_id, *index - 1);
+
+            // Wake any waiters for this stream
+            if let Some(n) = self.notifiers.lock().unwrap().get(&stream_id).cloned() {
+                n.notify_waiters();
+            }
         }
     }
 

@@ -13,15 +13,16 @@ use tower_http::{cors::CorsLayer, services::ServeDir};
 use tower_http::trace::{TraceLayer, DefaultMakeSpan};
 use socketioxide::{SocketIo, extract::{Data, SocketRef}, socket::DisconnectReason, SendError, SocketError};
 use rayon::ThreadPool;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::sync::oneshot;
 
 use crate::handlers::experiment::ExperimentHandler;
+use crate::metrics_logger::MetricsLoggerError;
 
 pub type ActiveJobs = Arc<tokio::sync::RwLock<HashMap<String, oneshot::Sender<()>>>>;
 
-#[derive(serde::Deserialize, serde::Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProcessOutput {
     level: String,
@@ -43,7 +44,7 @@ pub struct SimpleSocketsResponse {
 pub async fn list_sockets(
     io: Arc<SocketIo>,
 ) -> Json<SimpleSocketsResponse> {
-    let sockets = io.sockets().unwrap_or_default();
+    let sockets = io.sockets();
     let mut simple_sockets = Vec::<SimpleSocket>::new();
     for socket in sockets {
         simple_sockets.push(SimpleSocket {
@@ -61,7 +62,7 @@ pub async fn clean_sockets(
     io: Arc<SocketIo>,
     sockets: Vec<String>,
 ) -> Json<SimpleSocketsResponse> {
-    let all_sockets = io.sockets().unwrap_or_default();
+    let all_sockets = io.sockets();
     let mut cleaned_sockets = Vec::<SimpleSocket>::new();
     for socket in all_sockets {
         if !socket.connected() || sockets.contains(&socket.id.to_string()) {
@@ -97,7 +98,7 @@ async fn list_experiments() -> Json<serde_json::Value> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "yaml") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "yaml") {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     experiments.push(name.to_string());
                 }
@@ -131,8 +132,14 @@ async fn exec_command_on_agent(
     info!("Executing command '{}' on node '{}'", command, node_id);
 
     // Check if the room exists
-    let room_name = format!("agent_{}", node_id);
-    let rooms = io.rooms().unwrap_or_default();
+    let room_name = format!("agent_{node_id}");
+    let rooms = match io.rooms().await {
+        Ok(r) => r,
+        Err(err) => {
+            error!("Failed to get rooms: {:?}", err);
+            vec![]
+        }
+    };
     // Print the room names
     let room_names = rooms.iter().map(|r| r.to_string()).collect::<Vec<String>>();
     if !room_names.contains(&room_name) {
@@ -141,19 +148,19 @@ async fn exec_command_on_agent(
             Json(ExecCommandResponse {
                 status: "error".to_string(),
                 message: None,
-                error: Some(format!("Node '{}' is not connected", node_id)),
+                error: Some(format!("Node '{node_id}' is not connected")),
             }),
         );
     }
 
 
     // Send the command to the agent
-    match io.to(format!("agent_{}", node_id)).emit("start_process", &command) {
+    match io.to(format!("agent_{node_id}")).emit("start_process", &command).await {
         Ok(_) => (
             StatusCode::OK,
             Json(ExecCommandResponse {
                 status: "success".to_string(),
-                message: Some(format!("Command sent to node '{}'", node_id)),
+                message: Some(format!("Command sent to node '{node_id}'")),
                 error: None,
             }),
         ),
@@ -162,10 +169,7 @@ async fn exec_command_on_agent(
             Json(ExecCommandResponse {
                 status: "error".to_string(),
                 message: None,
-                error: Some(format!(
-                    "Failed to send command to node '{}': {:?}",
-                    node_id, err
-                )),
+                error: Some(format!("Failed to send command to node '{node_id}': {err:?}")),
             }),
         ),
     }
@@ -198,18 +202,24 @@ pub async fn update_network_conditions_on_agent(
     let interface = payload.interface;
 
     // Construct the name of the room
-    let room_name = format!("agent_{}", node_id);
+    let room_name = format!("agent_{node_id}");
 
     // Check if the node (room) is connected
-    let rooms = io.rooms().unwrap_or_default();
+    let rooms = match io.rooms().await {
+        Ok(r) => r,
+        Err(err) => {
+            error!("Failed to get rooms: {:?}", err);
+            vec![]
+        }
+    };
     let room_names = rooms.iter().map(|r| r.to_string()).collect::<Vec<String>>();
     if !room_names.contains(&room_name) {
         return (
-            StatusCode::NOT_FOUND,
+            StatusCode::SERVICE_UNAVAILABLE,
             Json(UpdateNetworkConditionsResponse {
                 status: "error".to_string(),
                 message: None,
-                error: Some(format!("Node '{}' is not connected", node_id)),
+                error: Some(format!("Node '{node_id}' is not connected")),
             }),
         );
     }
@@ -223,15 +233,14 @@ pub async fn update_network_conditions_on_agent(
     });
 
     // Try sending the event to the agent
-    match io.to(room_name).emit("update_network_conditions", &emit_payload) {
+    match io.to(room_name).emit("update_network_conditions", &emit_payload).await {
         Ok(_) => {
             (
                 StatusCode::OK,
                 Json(UpdateNetworkConditionsResponse {
                     status: "success".to_string(),
                     message: Some(format!(
-                        "Network conditions command sent to node '{}': bw={}, latency={}, loss={}",
-                        node_id, bandwidth, latency, loss
+                        "Network conditions command sent to node '{node_id}': bw={bandwidth}, latency={latency}, loss={loss}"
                     )),
                     error: None
                 })
@@ -244,8 +253,7 @@ pub async fn update_network_conditions_on_agent(
                     status: "error".to_string(),
                     message: None,
                     error: Some(format!(
-                        "Failed to emit 'update_network_conditions' event to node '{}': {:?}",
-                        node_id, err
+                        "Failed to emit 'update_network_conditions' event to node '{node_id}': {err:?}"
                     ))
                 })
             )
@@ -253,7 +261,6 @@ pub async fn update_network_conditions_on_agent(
     }
 }
    
-
 fn generate_color_code(node_id: &str) -> u8 {
     // Use SHA-256 to hash the node_id for better distribution
     let mut hasher = Sha256::new();
@@ -268,7 +275,65 @@ fn generate_color_code(node_id: &str) -> u8 {
 
 // Function to wrap text with ANSI color codes
 fn colorize_text(text: &str, color_code: u8) -> String {
-    format!("\x1b[38;5;{}m[{}]\x1b[0m", color_code, text)
+    format!("\x1b[38;5;{color_code}m[{text}]\x1b[0m")
+}
+
+#[derive(Deserialize)]
+struct MetricsLatestQuery {
+    instance: String,
+    metric: String,
+    n: Option<usize>, // defaults to 60 if not provided
+}
+
+#[derive(Serialize)]
+struct MetricsLatestResponse {
+    instance: String,
+    metric: String,
+    count: usize,
+    values: Vec<(i64, f64)>,
+    error: Option<String>,
+}
+
+// Get the latest metrics for a specific instance and metric
+async fn get_latest_metrics(
+    payload: MetricsLatestQuery,
+    experiment_handler: Arc<Mutex<ExperimentHandler>>,
+) -> (StatusCode, Json<MetricsLatestResponse>) {
+    let instance = payload.instance;
+    let metric = payload.metric;
+    let n = payload.n.unwrap_or(60);
+
+    let handler = experiment_handler.lock().await;
+    let values = handler.get_latest_metrics(&instance, &metric, n).await;
+    match values {
+        Ok(values) => (
+            StatusCode::OK,
+            Json(MetricsLatestResponse {
+                instance,
+                metric,
+                count: values.len(),
+                values,
+                error: None,
+            }),
+        ),
+        Err(MetricsLoggerError::LoggerNotInitialized | MetricsLoggerError::MissingData | MetricsLoggerError::NotRunning) => (
+            StatusCode::NOT_FOUND,
+            Json(MetricsLatestResponse { instance, metric, count: 0, values: Vec::new(), error: values.err().map(|err| format!("{err:?}")) }),
+        ),
+        Err(err) => {
+            error!("Error fetching latest metrics: {err:?}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MetricsLatestResponse {
+                    instance,
+                    metric,
+                    count: 0,
+                    values: Vec::new(),
+                    error: Some(format!("{err:?}"))
+                }),
+            )
+        },
+    }
 }
 
 pub fn create_router(_active_jobs: ActiveJobs, _thread_pool: Arc<ThreadPool>) -> Router {
@@ -285,7 +350,6 @@ pub fn create_router(_active_jobs: ActiveJobs, _thread_pool: Arc<ThreadPool>) ->
 
         socket.on_disconnect(|socket: SocketRef, reason: DisconnectReason| async move {
             info!("Socket {} on ns {} disconnected, reason: {:?}", socket.id, socket.ns(), reason);
-            socket.leave("broadcast").unwrap();
         });
 
         let agent_registry_clone = Arc::clone(&agent_registry);
@@ -326,7 +390,7 @@ pub fn create_router(_active_jobs: ActiveJobs, _thread_pool: Arc<ThreadPool>) ->
         let agent_registry_clone = agent_registry.clone();
         socket.on("agent_ready", move |s: SocketRef, Data(node_id): Data<String>| {
             let agent_registry = agent_registry_clone.clone();
-            s.join(format!("agent_{}", node_id)).unwrap();
+            s.join(format!("agent_{node_id}"));
             async move {
                 let socket_id = s.id.to_string();
                 info!("WebSocket id: {:#?} belongs to the agent of {}", socket_id, node_id);
@@ -569,6 +633,15 @@ pub fn create_router(_active_jobs: ActiveJobs, _thread_pool: Arc<ThreadPool>) ->
                 }
             })
         )
+        .route("/get_latest_metrics",
+         get({
+                let handler = experiment_handler.clone();
+                move |Query(params): Query<MetricsLatestQuery>| {
+                    let handler = handler.clone();
+                    get_latest_metrics(params, handler)
+                }
+            })
+        )
         .layer(CorsLayer::permissive()) // Enable CORS policy
         .layer(
             ServiceBuilder::new()
@@ -579,9 +652,16 @@ pub fn create_router(_active_jobs: ActiveJobs, _thread_pool: Arc<ThreadPool>) ->
                         )
                         .on_request(
                         |request: &Request<_>, _span: &tracing::Span| {
+                            let uri_path = request.uri().path();
+
+                            // Do not log if path is /get_latest_metrics
+                            if uri_path == "/get_latest_metrics" {
+                                return;
+                            }
+
                             tracing::info!(
                                 "Received request for endpoint: {}",
-                                request.uri().path()
+                                uri_path
                             );
                         })
                 )

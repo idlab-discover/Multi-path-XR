@@ -51,6 +51,15 @@ elif [[ "$MODE" == "--metrics" ]]; then
         echo "Error: Controller script not found or not executable at $METRICS_SCRIPT."
         exit 1
     fi
+elif [[ "$MODE" == "--draco" ]]; then
+    # Check if the draco script exists
+    METRICS_SCRIPT="./Libraries/Draco/run.sh"
+    if [[ -f "$METRICS_SCRIPT" && -x "$METRICS_SCRIPT" ]]; then
+        "$METRICS_SCRIPT" "$@"
+    else
+        echo "Error: Controller script not found or not executable at $METRICS_SCRIPT."
+        exit 1
+    fi
 elif [[ "$MODE" == "--controller" ]]; then
     # Check if the controller script exists
     CONTROLLER_SCRIPT="./Controller/run.sh"

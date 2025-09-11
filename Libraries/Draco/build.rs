@@ -8,10 +8,10 @@ fn main() {
     env::set_var("OUT_DIR", out_dir);
 
     // Create build dir if it does not exist yet
-    let dir = format!("{}/build/{}", out_dir, out_dir);
+    let dir = format!("{out_dir}/build/{out_dir}");
     match fs::create_dir_all(dir.clone()) {
         Ok(_) => println!("Build directory created"),
-        Err(e) => println!("Unable to create build directory: {}", e),
+        Err(e) => println!("Unable to create build directory: {e}"),
     }
 
     // Inside dir there should be another build folder that is actually a symlink to out_dir/build
@@ -19,12 +19,12 @@ fn main() {
     // This workaround prevents duplicate build directories
     let current_dir = env::current_dir().unwrap().into_os_string().into_string().unwrap();
     println!("Current directory: {}", current_dir.clone());
-    let og_dir = format!("{}/{}/build", current_dir, out_dir);
-    let new_dir = format!("{}/build/{}/build", out_dir, out_dir);
+    let og_dir = format!("{current_dir}/{out_dir}/build");
+    let new_dir = format!("{out_dir}/build/{out_dir}/build");
     #[cfg(unix)]
     match std::os::unix::fs::symlink(og_dir, new_dir) {
         Ok(_) => println!("Symlink created"),
-        Err(e) => println!("Unable to create symlink: {}", e),
+        Err(e) => println!("Unable to create symlink: {e}"),
     }
     #[cfg(windows)]
     match std::os::windows::fs::symlink_dir(out_dir, symlink) {
@@ -33,6 +33,9 @@ fn main() {
     }
 
     let mut config = Config::new("draco_wrapper_cpp");
+
+    let enable_native_optimizations = env::var("ENABLE_NATIVE_OPTIMIZATIONS")
+        .is_ok_and(|val| val == "1");
 
     // Check our target platform
     if cfg!(target_os = "windows") {
@@ -52,20 +55,30 @@ fn main() {
         config.cflag("-static-libstdc++");
         config.cxxflag("-static-libstdc++");
 
-        config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3 -static -static-libgcc -static-libstdc++");
+        if enable_native_optimizations {
+            // Enable native optimizations for MinGW
+            config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3 -march=native -mtune=native -static -static-libgcc -static-libstdc++");
+        } else {
+            config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3 -mtune=generic -static -static-libgcc -static-libstdc++");
+        }
 
         // If you want to use MinGW Makefiles:
         config.generator("MinGW Makefiles");
-    }else {
-        config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3");
+    } else if enable_native_optimizations {
+        // For other platforms, enable native optimizations
+        config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3 -march=native -mtune=native");
+    } else {
+        config.define("CMAKE_CXX_FLAGS", "-std=c++17 -O3 -mtune=generic");
     }
+
+    let release_mode = env::var("RELEASE_MODE_IS_SET").is_ok_and(|val| val == "1");
 
 
     let dst = config
     .define("draco_build", "${CMAKE_CURRENT_BINARY_DIR}")  // Override draco_build due to a bug in Draco CMakeLists.txt
     .always_configure(false)
     .build_target("draco_wrapper_cpp_static")  // Build the Draco static library and the wrapper
-    .profile("Release")
+    .profile(if release_mode { "Release" } else { "Debug" }) // Use Release profile if RELEASE_MODE_IS_SET is set to 1
     .build();
     
     // Expect the dst.display to be "output" directory

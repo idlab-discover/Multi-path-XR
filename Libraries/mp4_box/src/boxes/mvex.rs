@@ -40,12 +40,14 @@ impl std::fmt::Debug for MvexBox {
 // Implementation of the `Mp4Box` trait for the `MvexBox` struct.
 impl Mp4Box for MvexBox {
     // Returns the box type as a 4-byte array. For `MvexBox`, the type is "mvex".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mvex" }
 
     // Calculates the size of the `MvexBox` in bytes.
     // The size includes:
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - The size of all `TrexBox` entries in the `trex_entries` vector.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 
         + self.mehd.as_ref().map_or(0, |m| m.box_size()) 
@@ -54,6 +56,7 @@ impl Mp4Box for MvexBox {
 
     // Writes the `MvexBox` to the provided buffer.
     // The method serializes the box size, box type, and the contents of all `TrexBox` entries into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
@@ -117,7 +120,7 @@ impl Mp4Box for MvexBox {
                     let (parsed_trex, _) = TrexBox::read_box(&data[offset..offset + sub_box_size])?;
                     trex_entries.push(parsed_trex);
                 },
-                _ => return Err(format!("Unknown box type in MVEX: {:?}", box_type)),
+                _ => return Err(format!("Unknown box type in MVEX: {box_type:?}")),
             }
 
             offset += sub_box_size;

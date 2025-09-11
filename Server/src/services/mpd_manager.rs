@@ -58,8 +58,8 @@ impl MpdManager {
                 mime_type: mime_type.to_string(),
                 codecs: codecs.to_string(),
                 bandwidth,
-                initialization: format!("{}/init.mp4", stream_id),
-                media: format!("{}/$Number%09d$.m4s", stream_id),
+                initialization: format!("{stream_id}/init.mp4"),
+                media: format!("{stream_id}/$Number%09d$.m4s"),
                 availability_time_offset: Some(-0.030),
                 availability_time_complete: Some(false)
             });
@@ -77,7 +77,9 @@ impl MpdManager {
 
     pub fn get_groups(&self) -> Vec<String> {
         let builders = self.builders.lock().unwrap();
-        builders.keys().cloned().collect()
+        let mut groups: Vec<String> = builders.keys().cloned().collect();
+        groups.sort();
+        groups
     }
 }
 

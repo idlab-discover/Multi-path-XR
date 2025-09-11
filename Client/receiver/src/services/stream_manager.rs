@@ -1,4 +1,6 @@
 use std::sync::{Arc, RwLock};
+use tracing::info;
+
 use crate::ingress::dash::DashIngress;
 use crate::ingress::flute::FluteIngress;
 use crate::ingress::websocket::WebSocketIngress;
@@ -12,6 +14,7 @@ pub struct StreamManager {
     pub websocket_url: RwLock<Option<String>>,
     pub flute_url: RwLock<Option<String>>,
 }
+crate::log_drop!(StreamManager);
 
 impl StreamManager {
     pub fn new() -> Self {
@@ -22,6 +25,25 @@ impl StreamManager {
             flute_ingress: RwLock::new(None),
             websocket_url: RwLock::new(None),
             flute_url: RwLock::new(None),
+        }
+    }
+
+    pub fn stop(&self) {
+        if let Some(ingress) = self.websocket_ingress.write().unwrap().take() {
+            ingress.stop();
+            info!("WebSocket ingress stopped");
+        }
+        if let Some(ingress) = self.webrtc_ingress.write().unwrap().take() {
+            ingress.stop();
+            info!("WebRTC ingress stopped");
+        }
+        if let Some(ingress) = self.dash_ingress.write().unwrap().take() {
+            ingress.stop();
+            info!("DASH ingress stopped");
+        }
+        if let Some(ingress) = self.flute_ingress.write().unwrap().take() {
+            ingress.stop();
+            info!("Flute ingress stopped");
         }
     }
 

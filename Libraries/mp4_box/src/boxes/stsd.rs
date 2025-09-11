@@ -84,18 +84,21 @@ impl std::fmt::Debug for VisualSampleEntry {
 
 impl Mp4Box for StsdBox {
     // Returns the box type as a 4-byte array. For `StsdBox`, the type is "stsd".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stsd" }
 
     // Calculates the size of the `StsdBox` in bytes.
     // The size includes:
     // - 16 bytes for the header (4 bytes for size, 4 bytes for type, 4 bytes for version/flags, and 4 bytes for entry count).
     // - The size of all `VisualSampleEntry` instances in the `entries` vector.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         16 + self.entries.iter().map(|e| e.box_size()).sum::<u32>()
     }
 
     // Writes the `StsdBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, entry count, and all `VisualSampleEntry` instances into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
@@ -192,6 +195,7 @@ impl VisualSampleEntry {
     // - 32 bytes for the compressor name (Pascal string, up to 31 bytes plus 1 byte for length).
     // - 4 bytes for depth and pre-defined fields.
     // - The size of the optional codec configuration data, if present.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let base_size = 86;
         let config_len = self.codec_config.as_ref().map_or(0, |c| c.len() as u32 + 8);
@@ -200,6 +204,7 @@ impl VisualSampleEntry {
 
     // Writes the `VisualSampleEntry` to the provided buffer.
     // The method serializes the entry's fields and optional codec configuration data into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.data_format);

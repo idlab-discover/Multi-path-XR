@@ -19,6 +19,7 @@ use flute::{
     sender::{Config, ObjectDesc, Sender},
 };
 use tracing::{info, debug, error, instrument};
+use shared_networking::udp::{build_multicast_sender, UdpTxOpts};
 
 use super::egress_common::{push_preencoded_frame_data, EgressCommonMetrics, EgressProtocol};
 
@@ -79,204 +80,12 @@ impl FluteEgress {
             bandwidth: Arc::new(Mutex::new(200_000_000)), // Default 200 Mbps
             latest_toi: Arc::new(Mutex::new(1)), // Start from 1
             fdt_id: Arc::new(Mutex::new(1)), // Start from 1
-            md5: Arc::new(Mutex::new(true)), // Start from 1
+            md5: Arc::new(Mutex::new(false)), // By default, MD5 is disabled
             egress_metrics: Arc::new(EgressCommonMetrics::new()),
         });
 
         // Store the instance in the StreamManager
         stream_manager.set_flute_egress(instance.clone());
-    }
-
-    /// Emits frame data over FLUTE protocol.
-    #[instrument(skip_all)]
-    fn emit_frame_data(&self, frame: FrameTaskData) {
-        debug!(
-            "Emitting frame with presentation time: {}",
-            frame.presentation_time
-        );
-
-
-        //let start = std::time::Instant::now();
-        // Initialize the FLUTE sender and UDP socket if not already done
-        let mut sender_guard = self.sender.lock().unwrap();
-        {
-            let mut udp_socket_guard = self.udp_socket.lock().unwrap();
-
-            if sender_guard.is_none() || udp_socket_guard.is_none() {
-
-                // Create the FLUTE sender
-                // Create UDP Socket
-                let endpoint = self.endpoint.lock().unwrap().clone();
-
-                let udp_socket_result = UdpSocket::bind("0.0.0.0:0");
-                let Ok(socket) = udp_socket_result else {
-                    error!("Failed to bind UDP socket: {:?}", udp_socket_result.err());
-                    return;
-                };
-                //socket.set_nonblocking(true).unwrap();
-                socket.set_multicast_ttl_v4(2).unwrap(); // TODO: make this configurable
-                // socket.set_multicast_loop_v4(true).unwrap();
-
-                // socket.join_multicast_v4(&endpoint.destination_group_address, None)?;
-
-                socket.connect(format!(
-                    "{}:{}",
-                    endpoint.destination_group_address, endpoint.port
-                )).unwrap();
-
-                *udp_socket_guard = Some(socket);
-
-                // Create FLUTE Sender
-                let tsi = 1; // Transport Session Identifier
-                let oti = self.create_oti(self.fec.lock().unwrap().clone(), *self.fec_parity_percentage.lock().unwrap());
-                let config = Config {
-                    toi_initial_value: Some(*self.latest_toi.lock().unwrap()),
-                    fdt_start_id: *self.fdt_id.lock().unwrap(),
-                    // fdt_publish_mode: flute::sender::FDTPublishMode::Automatic,
-                    ..Default::default()
-                };
-
-                let sender = Sender::new(endpoint.clone(), tsi, &oti, &config);
-
-                *sender_guard = Some(sender);
-
-                debug!("FLUTE sender and UDP socket initialized");
-            }
-        }
-
-        let sender = sender_guard.as_mut().unwrap();
-        //let udp_socket = udp_socket_guard.as_mut().unwrap();
-
-        let content_encoding = *self.content_encoding.lock().unwrap();
-
-        // Prepare the frame data as an ObjectDesc
-        let now = SystemTime::now();
-        let uri = format!("file://frame_{}_{}.bin", frame.presentation_time, frame.send_time);
-        // Convert the frame to JSON and then to bytes
-        //let bytes = serde_json::to_string(&frame).unwrap().as_bytes().to_vec();
-        debug!("Frame data as JSON converted to a vector of {} bytes", frame.data.len());
-        let obj = ObjectDesc::create_from_buffer(
-            frame.data,
-            "application/octet-stream",
-            &url::Url::parse(&uri).unwrap(),
-            1,
-            None,
-            None, // TODO: check if any of these fields need to be set
-            None,
-            None,
-            content_encoding,
-            true,
-            None,
-            *self.md5.lock().unwrap(),
-        )
-        .unwrap();
-
-        debug!("Frame data prepared as ObjectDesc");
-
-        // Add object(s) (frames) to the FLUTE sender (priority queue 0)
-        let toi = sender.add_object(0, obj);
-        if toi.is_err() {
-            error!("Failed to add object to FLUTE sender");
-            return;
-        }
-
-        let toi = toi.unwrap();
-
-        //info!("Object added to FLUTE sender with TOI: {}", toi);
-
-        // Update the latest TOI
-        let mut latest_toi = self.latest_toi.lock().unwrap();
-        // If the TOI is greater than the latest TOI, update it
-        if toi > *latest_toi {
-            *latest_toi = toi;
-        }
-        
-
-        // t/*
-        // Always call publish after adding objects, if fdt publish mode is manual
-        let fdt_publish = sender.publish(now);
-        if fdt_publish.is_err() {
-            error!("Failed to publish FDT: {:?}", fdt_publish.err());
-            return;
-        }
-
-        debug!("FDT published");
-        //*/
-
-        // Increment the FDT ID
-        let mut fdt_id = self.fdt_id.lock().unwrap();
-        *fdt_id = (*fdt_id + 1) & 0xFFFFF;
-
-
-
-        //let elapsed = start.elapsed();
-        //info!("Frame conversion took: {:?} ms", elapsed);
-
-        let mut fdt_pkts: Vec<Vec<u8>> = vec![];
-        let mut file_pkt_count = 0;
-        while let Some(pkt) = sender.read(now) {
-            if pkt.is_empty() {
-                break;
-            }
-            let lct_header = crate::egress::flute::FluteEgress::parse_lct_header(&pkt);
-            if let Ok(lct_header) = lct_header {
-                if lct_header.toi == 0 {
-                    // Clone the packet into the fdt_pkts vector
-                    fdt_pkts.push(pkt.clone());
-                } else {
-                    file_pkt_count += 1;
-                }
-            }
-
-            let mut attempts = 0;
-            loop {
-                {
-                    // Use a small scope to release the lock each iteration
-                    let mut queue = self.packet_queue.lock().unwrap();
-                    if !queue.is_full() {
-                        queue.push_back(pkt);
-                        break;
-                    }
-                }
-                attempts += 1;
-                if attempts > 1000 {
-                    break;
-                }
-                // debug!("Packet queue is full, waiting for space...");
-                // Waiting outside the scope to prevent busy-waiting with an active lock
-                thread::sleep(Duration::from_micros(100));
-            }
-            if attempts > 1000 {
-                error!("Packet queue is full and has not been emptied for a long time, dropping frame packets");
-                break;
-            }
-        }
-        // Only retransmit FDT packets if they are worth sending.
-        // Small files that only have a few packets, are probably not significant
-        // and thus not worth the extra overhead.
-        if !fdt_pkts.is_empty() && file_pkt_count > 3 {
-            // Retransmit the FDT packets by pushing them to the packet queue
-            for pkt in fdt_pkts {
-                // Use a small scope to release the lock each iteration
-                let mut queue = self.packet_queue.lock().unwrap();
-                if queue.is_full() {
-                    break;
-                }
-                queue.push_back(pkt.clone());
-            }
-        } else {
-            error!("No FDT packets received");
-        }
-
-        //let elapsed = start.elapsed();
-        //info!("Frame emission took: {:?} ms", elapsed);
-
-        debug!("Frame emitted with send time: {}, presentation time: {} and toi {}", frame.send_time, frame.presentation_time, toi);
-
-        // Remove the object from the FLUTE sender
-        let _ = sender.remove_object(toi);
-
-        debug!("Object removed from FLUTE sender");
     }
 
     /// This thread continuously takes from `packet_queue` and sends to `udp_socket`,
@@ -503,8 +312,7 @@ impl FluteEgress {
         let version = flags1 >> 4;
         if version != 1 && version != 2 {
             return Err(format!(
-                "FLUTE version {} is not supported",
-                version
+                "FLUTE version {version} is not supported"
             ));
         }
     
@@ -599,9 +407,12 @@ impl EgressProtocol for FluteEgress {
         );
 
         let self_clone = self.clone();
-        thread::spawn(move || {
-            self_clone.packet_transmitter_loop();
-        });
+        thread::Builder::new()
+            .name("flute_transmitter".to_string())
+            .spawn(move || {
+                self_clone.packet_transmitter_loop();
+            })
+            .expect("Failed to spawn flute_transmitter thread");
     }
 
     fn push_point_cloud(&self, point_cloud: PointCloudData, stream_id: String) {
@@ -643,6 +454,197 @@ impl EgressProtocol for FluteEgress {
             client_id,
             tile_index,
         );
+    }
+
+    /// Emits frame data over FLUTE protocol.
+    #[instrument(skip_all)]
+    fn emit_frame_data(&self, frame: FrameTaskData) {
+        debug!(
+            "Emitting frame with presentation time: {}",
+            frame.presentation_time
+        );
+
+
+        //let start = std::time::Instant::now();
+        // Initialize the FLUTE sender and UDP socket if not already done
+        let mut sender_guard = self.sender.lock().unwrap();
+        {
+            let mut udp_socket_guard = self.udp_socket.lock().unwrap();
+
+            if sender_guard.is_none() || udp_socket_guard.is_none() {
+
+                // Create the FLUTE sender
+                // Create UDP Socket
+                let endpoint = self.endpoint.lock().unwrap().clone();
+
+                let dst: std::net::SocketAddr = format!("{}:{}", endpoint.destination_group_address, endpoint.port)
+                    .parse()
+                    .expect("invalid FLUTE dst");
+                let socket = build_multicast_sender(UdpTxOpts {
+                    dst,
+                    ttl_v4: Some(2),
+                    hops_v6: Some(2),
+                    v4_if: None,
+                    v6_ifindex: None,
+                    snd_buf_bytes: 8 * 1024 * 1024,
+                    disable_loop: false,
+                    //..Default::default()
+                }).expect("multicast Tx socket");
+
+                *udp_socket_guard = Some(socket);
+
+                // Create FLUTE Sender
+                let tsi = 1; // Transport Session Identifier
+                let oti = self.create_oti(self.fec.lock().unwrap().clone(), *self.fec_parity_percentage.lock().unwrap());
+                let config = Config {
+                    toi_initial_value: Some(*self.latest_toi.lock().unwrap()),
+                    fdt_start_id: *self.fdt_id.lock().unwrap(),
+                    // fdt_publish_mode: flute::sender::FDTPublishMode::Automatic,
+                    ..Default::default()
+                };
+
+                let sender = Sender::new(endpoint.clone(), tsi, &oti, &config);
+
+                *sender_guard = Some(sender);
+
+                debug!("FLUTE sender and UDP socket initialized");
+            }
+        }
+
+        let sender = sender_guard.as_mut().unwrap();
+        //let udp_socket = udp_socket_guard.as_mut().unwrap();
+
+        let content_encoding = *self.content_encoding.lock().unwrap();
+
+        // Prepare the frame data as an ObjectDesc
+        let now = SystemTime::now();
+        let uri = format!("file://frame_{}_{}.bin", frame.presentation_time, frame.send_time);
+        // Convert the frame to JSON and then to bytes
+        //let bytes = serde_json::to_string(&frame).unwrap().as_bytes().to_vec();
+        debug!("Frame data as JSON converted to a vector of {} bytes", frame.data.len());
+        let obj = ObjectDesc::create_from_buffer(
+            frame.data,
+            "application/octet-stream",
+            &url::Url::parse(&uri).unwrap(),
+            1,
+            None,
+            // TODO: check if any of these fields need to be set
+            None, // e.g. the target acquisition could be used to spread out the data over a window, such as one frame time.
+            None,
+            None,
+            content_encoding,
+            true,
+            None,
+            *self.md5.lock().unwrap(),
+        )
+        .unwrap();
+
+        debug!("Frame data prepared as ObjectDesc");
+
+        // Add object(s) (frames) to the FLUTE sender (priority queue 0)
+        let toi = sender.add_object(0, obj);
+        if toi.is_err() {
+            error!("Failed to add object to FLUTE sender");
+            return;
+        }
+
+        let toi = toi.unwrap();
+
+        //info!("Object added to FLUTE sender with TOI: {}", toi);
+
+        // Update the latest TOI
+        let mut latest_toi = self.latest_toi.lock().unwrap();
+        // If the TOI is greater than the latest TOI, update it
+        if toi > *latest_toi {
+            *latest_toi = toi;
+        }
+        
+
+        // t/*
+        // Always call publish after adding objects, if fdt publish mode is manual
+        let fdt_publish = sender.publish(now);
+        if fdt_publish.is_err() {
+            error!("Failed to publish FDT: {:?}", fdt_publish.err());
+            return;
+        }
+
+        debug!("FDT published");
+        //*/
+
+        // Increment the FDT ID
+        let mut fdt_id = self.fdt_id.lock().unwrap();
+        *fdt_id = (*fdt_id + 1) & 0xFFFFF;
+
+
+
+        //let elapsed = start.elapsed();
+        //info!("Frame conversion took: {:?} ms", elapsed);
+
+        let mut fdt_pkts: Vec<Vec<u8>> = vec![];
+        let mut file_pkt_count = 0;
+        while let Some(pkt) = sender.read(now) {
+            if pkt.is_empty() {
+                break;
+            }
+            let lct_header = crate::egress::flute::FluteEgress::parse_lct_header(&pkt);
+            if let Ok(lct_header) = lct_header {
+                if lct_header.toi == 0 {
+                    // Clone the packet into the fdt_pkts vector
+                    fdt_pkts.push(pkt.clone());
+                } else {
+                    file_pkt_count += 1;
+                }
+            }
+
+            let mut attempts = 0;
+            loop {
+                {
+                    // Use a small scope to release the lock each iteration
+                    let mut queue = self.packet_queue.lock().unwrap();
+                    if !queue.is_full() {
+                        queue.push_back(pkt);
+                        break;
+                    }
+                }
+                attempts += 1;
+                if attempts > 1000 {
+                    break;
+                }
+                // debug!("Packet queue is full, waiting for space...");
+                // Waiting outside the scope to prevent busy-waiting with an active lock
+                thread::sleep(Duration::from_micros(100));
+            }
+            if attempts > 1000 {
+                error!("Packet queue is full and has not been emptied for a long time, dropping frame packets");
+                break;
+            }
+        }
+        // Only retransmit FDT packets if they are worth sending.
+        // Small files that only have a few packets, are probably not significant
+        // and thus not worth the extra overhead.
+        if !fdt_pkts.is_empty() && file_pkt_count > 3 {
+            // Retransmit the FDT packets by pushing them to the packet queue
+            for pkt in fdt_pkts {
+                // Use a small scope to release the lock each iteration
+                let mut queue = self.packet_queue.lock().unwrap();
+                if queue.is_full() {
+                    break;
+                }
+                queue.push_back(pkt.clone());
+            }
+        } else {
+            error!("No FDT packets received");
+        }
+
+        //let elapsed = start.elapsed();
+        //info!("Frame emission took: {:?} ms", elapsed);
+
+        debug!("Frame emitted with send time: {}, presentation time: {} and toi {}", frame.send_time, frame.presentation_time, toi);
+
+        // Remove the object from the FLUTE sender
+        let _ = sender.remove_object(toi);
+
+        debug!("Object removed from FLUTE sender");
     }
 
     fn set_fps(&self, fps: u32) {

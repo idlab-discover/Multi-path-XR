@@ -33,6 +33,9 @@ namespace Be.Ugent
         [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "init")]
         public static extern void init(uint log_level, string server_url, string multicast_url);
 
+        [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "destroy")]
+        public static extern void destroy();
+
         /// Get the list of stream IDs.
         /// This function returns all active stream IDs as a vector of strings.
         [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "get_stream_ids")]
@@ -46,6 +49,9 @@ namespace Be.Ugent
 
         [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "consume_frame")]
         public static extern bool consume_frame(Sliceu8 stream_id);
+
+        [DllImport(NativeLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "dash_set_fetching_enabled")]
+        public static extern void dash_set_fetching_enabled(string group_id, bool enabled);
 
     }
 

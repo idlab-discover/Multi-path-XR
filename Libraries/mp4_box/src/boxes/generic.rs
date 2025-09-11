@@ -68,6 +68,7 @@ impl Mp4Box for UnknownBox {
     // Returns the box type as a 4-byte array. For `UnknownBox`, the type is "xxxx" by default.
     // However, when reading from a file, this type can be set to the actual box type.
     // This allows the `UnknownBox` to represent any box type that is not explicitly defined.
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] {
         self.btype
     }
@@ -76,12 +77,14 @@ impl Mp4Box for UnknownBox {
     // The size includes:
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - The size of the `data` field, which contains the raw media data.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + self.data.len() as u32
     }
 
     // Writes the `MdatBox` to the provided buffer.
     // The method serializes the box size, box type, and the raw media data into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

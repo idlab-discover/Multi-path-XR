@@ -31,6 +31,7 @@ impl std::fmt::Debug for TfdtBox {
 // Implementation of the `Mp4Box` trait for the `TfdtBox` struct.
 impl Mp4Box for TfdtBox {
     // Returns the box type as a 4-byte array. For `TfdtBox`, the type is "tfdt".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"tfdt" }
 
     // Calculates the size of the `TfdtBox` in bytes.
@@ -38,6 +39,7 @@ impl Mp4Box for TfdtBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - 4 bytes for the version and flags.
     // - 8 bytes for the `base_decode_time` field.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + if self.version == 1 { 8 } else { 4 }
         // 8 header + 4 version/flags + decode time (32 or 64 bits)
@@ -45,6 +47,7 @@ impl Mp4Box for TfdtBox {
 
     // Writes the `TfdtBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `base_decode_time` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
@@ -79,7 +82,7 @@ impl Mp4Box for TfdtBox {
         } else if version == 0 {
             u32::from_be_bytes(data[12..16].try_into().unwrap()) as u64
         } else {
-            return Err(format!("Unsupported TFDT version: {}", version));
+            return Err(format!("Unsupported TFDT version: {version}"));
         };
 
         Ok((

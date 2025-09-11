@@ -108,7 +108,9 @@ impl TrackLocalPointCloudRTP {
             // 2.2) “samples” is how many clock ticks we’re generating in one frame
             let samples = 0; /*{
                 (internal.clock_rate / internal.fps) as u32
-            };*/
+            };*/ // TODO: sample duration * clock rate is what pion and webrtc do in track_local_static
+            // https://github.com/pion/webrtc/blob/master/track_local_static.go#L343
+            // https://github.com/webrtc-rs/webrtc/blob/master/webrtc/src/track/track_local/track_local_static_sample.rs#L137
 
             // 2.3) Ensure packetizer is initialized
             let mut packetizer = if let Some(packetizer) = internal.packetizer.as_mut() {
@@ -116,6 +118,8 @@ impl TrackLocalPointCloudRTP {
             } else {
                 return Err(webrtc::Error::new("Packetizer is not initialized. Call `bind()` first.".to_owned()));
             };
+
+            // TODO: check if we should implement the prev_dropped_packets from the links above
             
     
             // 2.4) Packetize

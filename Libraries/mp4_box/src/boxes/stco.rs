@@ -49,6 +49,7 @@ impl std::fmt::Debug for StcoBox {
 // Implementation of the `Mp4Box` trait for the `StcoBox` struct.
 impl Mp4Box for StcoBox {
     // Returns the box type as a 4-byte array. For `StcoBox`, the type is "stco".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stco" }
 
     // Calculates the size of the `StcoBox` in bytes.
@@ -57,12 +58,14 @@ impl Mp4Box for StcoBox {
     // - 4 bytes for the version and flags.
     // - 4 bytes for the `entry_count` field.
     // - 4 bytes for each entry in the `entries` vector.
+    #[inline(always)]
     fn box_size(&self) -> u32 { 
         8 + 4 + 4 + (4 * self.entries.len() as u32)
      }
 
     // Writes the `StcoBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `entry_count` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         // Write the size of the box in big-endian format.
         buffer.extend_from_slice(&self.box_size().to_be_bytes());

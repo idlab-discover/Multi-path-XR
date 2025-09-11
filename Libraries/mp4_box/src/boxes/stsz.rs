@@ -56,6 +56,7 @@ impl std::fmt::Debug for StszBox {
 // Implementation of the `Mp4Box` trait for the `StszBox` struct.
 impl Mp4Box for StszBox {
     // Returns the box type as a 4-byte array. For `StszBox`, the type is "stsz".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stsz" }
 
     // Calculates the size of the `StszBox` in bytes.
@@ -65,6 +66,7 @@ impl Mp4Box for StszBox {
     // - 4 bytes for the `sample_size` field, which is set to 0 in this implementation.
     // - 4 bytes for the `sample_count` field, which is set to 0 in this implementation.
     // - 4 bytes for each entry size in the `entry_sizes` vector.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let base = 8 + 4 + 4 + 4;
         if self.sample_size == 0 {
@@ -76,6 +78,7 @@ impl Mp4Box for StszBox {
 
     // Writes the `StszBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, `sample_size`, and `sample_count` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

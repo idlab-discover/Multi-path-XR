@@ -1,4 +1,4 @@
-use rand::{distributions::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
+use rand::{distr::weighted::WeightedIndex, prelude::Distribution, seq::SliceRandom, Rng};
 use shared_utils::types::Point3D;
 use tracing::{instrument, debug};
 
@@ -6,9 +6,9 @@ use tracing::{instrument, debug};
 #[instrument(skip_all)]
 #[allow(dead_code)]
 pub fn random_sampling<T: Clone>(data: &[T], sample_rate: f64) -> Vec<T> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     data.iter()
-        .filter(|_| rng.gen_bool(sample_rate))
+        .filter(|_| rng.random_bool(sample_rate))
         .cloned()
         .collect()
 }
@@ -20,14 +20,14 @@ pub fn exact_random_sampling<T: Clone>(data: &[T], target_count: usize) -> Vec<T
     assert!(target_count <= data.len(), "Target count cannot exceed the number of input points");
     debug!("Performing exact random sampling with target count: {}", target_count);
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut indices: Vec<usize> = Vec::with_capacity(target_count);
 
     let mut n = target_count; // Remaining slots to fill
     let mut data_len = data.len(); // Remaining elements in the input data
 
     for (index, _) in data.iter().enumerate() {
-        let p: f64 = rng.gen(); // Generate a random number in the range [0, 1)
+        let p: f64 = rng.random(); // Generate a random number in the range [0, 1)
         if (data_len as f64 * p) <= n as f64 {
             indices.push(index);
             n -= 1;
@@ -90,7 +90,7 @@ pub fn biased_exact_random_sampling(
         .collect();
 
     // Create a weighted index for selection
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let dist = WeightedIndex::new(&weights).expect("Invalid weights");
 
     let mut selected = std::collections::HashSet::with_capacity(target_count);
@@ -129,7 +129,7 @@ pub fn partition_by_percentages<T: Clone>(
 
     // ---- 1) shuffle point indices ----------------------------------------
     let mut indices: Vec<usize> = (0..n_items).collect();
-    indices.shuffle(&mut rand::thread_rng());
+    indices.shuffle(&mut rand::rng());
 
     // ---- 2) carve the shuffled list according to the requested shares ----
     let mut offset = 0usize;

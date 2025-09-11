@@ -107,7 +107,7 @@ impl WebRTCEgress {
                 .thread_name_fn(|| {
                     static ATOMIC_WEBRTC_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
                     let id = ATOMIC_WEBRTC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    format!("WRTC_R w-{}", id)
+                    format!("WRTC_R w-{id}")
                 })
                 .enable_all()
                 .build().unwrap();
@@ -148,6 +148,8 @@ impl WebRTCEgress {
         let mut rtp_senders = self.rtp_senders.write().unwrap();
         let mut tracks_ids_to_remove = Vec::new();
         let mut binding = rtp_senders.clone();
+        // Get the runtime
+        let runtime = self.get_runtime();
         // Remove the tracks that belong to the client
         for client_tracks in binding.iter_mut() {
             let rtp_sender = client_tracks.1.remove(client_id);
@@ -155,13 +157,14 @@ impl WebRTCEgress {
                 // Close the sender
                 // Get the peer connection
                 if let Some(peer_connection) = self.peer_connections.read().unwrap().get(client_id).cloned() {
-                    // Get the runtime
-                    let runtime = self.get_runtime();
                     // Close the peer connection
                     let peer_connection_clone = peer_connection.clone();
                     let rtp_sender_clone = rtp_sender.clone();
                     runtime.spawn(async move {
-                        peer_connection_clone.remove_track(&rtp_sender_clone).await.unwrap();
+                        if let Err(e) = peer_connection_clone.remove_track(&rtp_sender_clone).await {
+                            // Ignore the error, optionally log if needed
+                            debug!("Error removing track: {:?}", e);
+                        }
                     });
                 }
             }
@@ -293,6 +296,7 @@ impl WebRTCEgress {
         let rtp_sender_clone = rtp_sender.clone();
         tokio::spawn(async move {
             let mut rtcp_buffer = vec![0; 1500];
+            // TODO: we should yield within this loop to allow other tasks to run
             while let Ok((_, _)) = rtp_sender_clone.read(&mut rtcp_buffer).await {}
             Result::<_, ()>::Ok(())
         });
@@ -308,6 +312,9 @@ impl WebRTCEgress {
                 if s == RTCPeerConnectionState::Connected {
                     // 9) Store the broadcast track to the tracks
                     self_clone.add_rtp_sender(track_id_clone.clone(), socket_id_clone.clone(), rtp_sender.clone());
+                } else if s == RTCPeerConnectionState::Disconnected || s == RTCPeerConnectionState::Failed {
+                    // 10) Remove the PeerConnection and the track
+                    self_clone.close_peer_connection(&socket_id_clone);
                 }
                 Box::pin(async move {})
             },

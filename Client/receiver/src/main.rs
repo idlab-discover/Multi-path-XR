@@ -45,9 +45,11 @@ fn main() {
     // Initialize the ingress system
     let ingress = Ingress::new(10, args.disable_parser);
     // Set the parameters first before initializing
-    let stream_manager = ingress.get_stream_manager();
-    stream_manager.set_websocket_url(args.server_url);
-    stream_manager.set_flute_url(args.multicast_url);
+    {
+        let stream_manager = ingress.get_stream_manager();
+        stream_manager.set_websocket_url(args.server_url);
+        stream_manager.set_flute_url(args.multicast_url);
+    }
     // Finish initializing the ingress system
     ingress.initialize();
 

@@ -1,4 +1,5 @@
-use prometheus::{self, Gauge, IntGauge, Opts, Registry};
+use prometheus::{self, Gauge, IntGauge, IntGaugeVec, Opts, Registry};
+use dashmap::DashMap;
 use sysinfo::{System, Networks};
 use std::{
     collections::HashMap,
@@ -18,7 +19,12 @@ pub struct Metrics {
     cpu_usage: Gauge,
     memory_usage: Gauge,
     network_metrics: Vec<(String, Gauge, Gauge)>, // (Interface, RX, TX)
-    custom_gauges: Arc<Mutex<HashMap<String, IntGauge>>>, // Store custom gauges by name
+    // Non-labelled custom gauges (name -> handle)
+    custom_gauges: Arc<DashMap<String, IntGauge>>,
+    // Labelled gauges (metric name -> GaugeVec)
+    labelled_gauge_vecs: Arc<DashMap<String, IntGaugeVec>>,
+    // Cache concrete labelled handles (name + label_values_key -> handle)
+    labelled_handle_cache: Arc<DashMap<String, IntGauge>>,
     system: Arc<Mutex<System>>,
     networks: Arc<Mutex<Networks>>,
 }
@@ -89,14 +95,14 @@ impl MetricsBuilder {
         for interface in self.interfaces {
             let sanitized_interface = Self::sanitize_name(&interface);
             let rx = Gauge::with_opts(Self::opts_with_labels(
-                &format!("{}_rx_bytes", sanitized_interface),
-                &format!("Received bytes for {}", interface),
+                &format!("{sanitized_interface}_rx_bytes"),
+                &format!("Received bytes for {interface}"),
                 &self.common_labels,
             ))
             .expect("Failed to create RX gauge");
             let tx = Gauge::with_opts(Self::opts_with_labels(
-                &format!("{}_tx_bytes", sanitized_interface),
-                &format!("Transmitted bytes for {}", interface),
+                &format!("{sanitized_interface}_tx_bytes"),
+                &format!("Transmitted bytes for {interface}"),
                 &self.common_labels,
             ))
             .expect("Failed to create TX gauge");
@@ -122,7 +128,9 @@ impl MetricsBuilder {
             cpu_usage,
             memory_usage,
             network_metrics,
-            custom_gauges: Arc::new(Mutex::new(custom_gauges)),
+            custom_gauges: Arc::new(custom_gauges.into_iter().collect::<DashMap<_,_>>().into()),
+            labelled_gauge_vecs: Arc::new(DashMap::new()),
+            labelled_handle_cache: Arc::new(DashMap::new()),
             system: Arc::new(Mutex::new(System::new())),
             networks: Arc::new(Mutex::new(Networks::new_with_refreshed_list())),
         };
@@ -202,28 +210,75 @@ impl Metrics {
         }
     }
 
-    /// Add or get a custom gauge by name.
-    #[instrument(skip_all)]
+    /// Create or get a Gauge (no labels).
+    /// Switched to DashMap to avoid a coarse lock in hot paths.
     pub fn get_or_create_gauge(&self, name: &str, description: &str) -> Result<IntGauge, String> {
-        let mut gauges = self
-            .custom_gauges
-            .lock()
-            .map_err(|_| "Failed to lock custom gauges".to_string())?;
-        if let Some(gauge) = gauges.get(name) {
-            return Ok(gauge.clone());
+        if let Some(entry) = self.custom_gauges.get(name) {
+            return Ok(entry.value().clone());
         }
-
         let labels = self
             .common_labels
             .read()
             .map_err(|_| "Failed to lock common labels".to_string())?;
         let opts = MetricsBuilder::opts_with_labels(name, description, &labels);
-        let gauge = IntGauge::with_opts(opts).map_err(|e| format!("Failed to create gauge: {}", e))?;
+        let gauge = IntGauge::with_opts(opts).map_err(|e| format!("Failed to create gauge: {e}"))?;
         self.registry
             .register(Box::new(gauge.clone()))
-            .map_err(|e| format!("Failed to register gauge: {}", e))?;
-        gauges.insert(name.to_string(), gauge.clone());
+            .map_err(|e| format!("Failed to register gauge: {e}"))?;
+        self.custom_gauges.insert(name.to_string(), gauge.clone());
         Ok(gauge)
+    }
+
+    /// Create or get a GaugeVec (labelled gauge family). Label keys must be stable for a given name.
+    pub fn get_or_create_gauge_vec(
+        &self,
+        name: &str,
+        description: &str,
+        label_keys: &[&str],
+    ) -> Result<IntGaugeVec, String> {
+        if let Some(entry) = self.labelled_gauge_vecs.get(name) {
+            return Ok(entry.value().clone());
+        }
+        let labels = self
+            .common_labels
+            .read()
+            .map_err(|_| "Failed to lock common labels".to_string())?;
+        let opts = MetricsBuilder::opts_with_labels(name, description, &labels);
+        let vec_ = IntGaugeVec::new(opts, label_keys)
+            .map_err(|e| format!("Failed to create gauge vec: {e}"))?;
+        self.registry
+            .register(Box::new(vec_.clone()))
+            .map_err(|e| format!("Failed to register gauge vec: {e}"))?;
+        self.labelled_gauge_vecs.insert(name.to_string(), vec_.clone());
+        Ok(vec_)
+    }
+
+    /// Create or get a concrete labelled IntGauge handle (name + specific label values).
+    /// Uses a fast DashMap cache keyed by name + '\x1F'-joined values.
+    pub fn get_or_create_labelled_gauge(
+        &self,
+        name: &str,
+        description: &str,
+        label_keys: &[&str],
+        label_values: &[&str],
+    ) -> Result<IntGauge, String> {
+        debug_assert_eq!(label_keys.len(), label_values.len());
+        let mut key = String::with_capacity(name.len() + 1 + 16 * label_values.len());
+        key.push_str(name);
+        key.push('|');
+        for (i, v) in label_values.iter().enumerate() {
+            if i > 0 { key.push('\x1F'); }
+            key.push_str(v);
+        }
+        if let Some(entry) = self.labelled_handle_cache.get(&key) {
+            return Ok(entry.value().clone());
+        }
+        let vec_ = self.get_or_create_gauge_vec(name, description, label_keys)?;
+        let handle = vec_
+            .get_metric_with_label_values(label_values)
+            .map_err(|e| format!("Failed to get labelled handle: {e}"))?;
+        self.labelled_handle_cache.insert(key, handle.clone());
+        Ok(handle)
     }
 
     /// Get the Prometheus registry.

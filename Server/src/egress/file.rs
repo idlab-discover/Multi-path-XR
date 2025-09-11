@@ -141,7 +141,7 @@ impl EgressProtocol for FileEgress {
         let client_id = frame.sfu_client_id.map_or("unknown".to_string(), |c| c.to_string());
         let tile = frame.sfu_tile_index.map_or("unknown".to_string(), |t| t.to_string());
         let send_time = frame.send_time;
-        let stream_id = format!("client_{}_{}", client_id, tile);
+        let stream_id = format!("client_{client_id}_{tile}");
         info!("FileEgress: stream_id: {}", stream_id);
         path.push(stream_id);
 
@@ -150,7 +150,7 @@ impl EgressProtocol for FileEgress {
             return;
         }
 
-        path.push(format!("{}.{}", send_time, extension));
+        path.push(format!("{send_time}.{extension}"));
 
         match File::create(&path) {
             Ok(mut file) => {

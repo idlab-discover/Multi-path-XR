@@ -18,6 +18,7 @@ TESTS="true"
 TARGET="x86_64-unknown-linux-gnu"
 WINDOWS_TARGET="false"
 UNSTABLE="false"
+NATIVE_OPT="false"
 
 # Parse command-line arguments
 for arg in "$@"; do
@@ -27,6 +28,7 @@ for arg in "$@"; do
             ;;
         --release)
             BUILD_MODE="release"
+            export RELEASE_MODE_IS_SET=1
             ;;
         --not-all)
             PACKAGES=""
@@ -37,6 +39,9 @@ for arg in "$@"; do
         --windows)
             TARGET="x86_64-pc-windows-gnu"
             WINDOWS_TARGET="true"
+            ;;
+        --native-opt)
+            NATIVE_OPT="true"
             ;;
     esac
 done
@@ -58,6 +63,13 @@ fi
 # Check if the unstable flag is set
 if [ "$UNSTABLE" = "true" ]; then
     RUSTFLAGS="$RUSTFLAGS --cfg tokio_unstable --cfg tracing_unstable"
+fi
+
+# Check if the native optimization flag is set
+if [ "$NATIVE_OPT" = "true" ]; then
+    # Enable native optimizations
+    RUSTFLAGS="$RUSTFLAGS -C target-cpu=native"
+    export ENABLE_NATIVE_OPTIMIZATIONS=1
 fi
 
 # Export RUSTFLAGS

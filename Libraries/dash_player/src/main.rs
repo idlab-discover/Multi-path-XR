@@ -1,4 +1,4 @@
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[allow(unreachable_patterns)]
 #[tokio::main]
@@ -14,13 +14,12 @@ async fn main() {
         match event {
             dash_player::DashEvent::Segment { data, content_type, representation_id: _, segment_number, duration: _, url: _, playback_rate } => {
                 info!("Received {} segment of size: {} at rate: {} and segment number: {}", content_type, data.len(), playback_rate, segment_number);
-                // TODO: write to file, buffer, feed to decoder, etc.
             }
             dash_player::DashEvent::Info(msg) => {
                 info!("Info: {}", msg);
             }
             dash_player::DashEvent::Warning(msg) => {
-                info!("Warning: {}", msg);
+                warn!("Warning: {}", msg);
             }
             dash_player::DashEvent::DownloadError { url, reason } => {
                 error!("Error downloading {}: {}", url, reason);

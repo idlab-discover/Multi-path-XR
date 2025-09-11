@@ -33,13 +33,16 @@ impl std::fmt::Debug for StssBox {
 }
 
 impl Mp4Box for StssBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"stss" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         8 + 4 + 4 + (self.entries.len() as u32) * 4
         // 8 = header, 4 = version+flags, 4 = entry_count, each entry = 4 bytes
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

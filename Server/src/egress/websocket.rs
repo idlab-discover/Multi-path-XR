@@ -181,7 +181,6 @@ impl EgressProtocol for WebSocketEgress {
         debug!("Bytes created");
         debug!("Encoded frame to {} bytes", bytes.len());
 
-        if emit_with_ack {
             // Calculate the difference between the send time and the presentation time
             let presentation_offset = if frame.send_time <= frame.presentation_time {
                 frame.presentation_time.saturating_sub(frame.send_time)
@@ -190,14 +189,9 @@ impl EgressProtocol for WebSocketEgress {
             };
             // The timeout should be the min of 800ms and the presentation offset + 500
             let timeout = Duration::from_millis(std::cmp::min(800, presentation_offset + 500));
-            // Emit the frame with acknowledgment
-            debug!(
-                "Emitting frame with acknowledgment and timeout: {:?}",
-                timeout
-            );
 
             // Check that at least one client is connected
-            if io.sockets().unwrap().is_empty() {
+            if io.sockets().is_empty() {
                 debug!("No clients connected to emit frame");
                 return;
             }
@@ -208,45 +202,50 @@ impl EgressProtocol for WebSocketEgress {
                 *runtime_guard = Some(runtime::Builder::new_multi_thread().worker_threads(2).thread_name_fn(|| {
                     static ATOMIC_WS_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
                     let id = ATOMIC_WS_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    format!("WS_R w-{}", id)
+                    format!("WS_R w-{id}")
                 }).enable_all().build().unwrap());
             }
             runtime_guard.as_ref().unwrap().block_on(async {
+                if emit_with_ack {
+                    // Emit the frame with acknowledgment
+                    debug!(
+                        "Emitting frame with acknowledgment and timeout: {:?}",
+                        timeout
+                    );
+                    match io
+                        .to("broadcast")
+                        .timeout(timeout)
+                        .emit_with_ack::<Bytes, Value>(
+                            "frame:broadcast:ack",
+                            &bytes,
+                        ).await {
+                        Ok(ack_stream) => match ack_stream.await {
+                            Ok(_) => debug!(
+                                "Ack received for frame with presentation time: {}",
+                                frame.presentation_time
+                            ),
+                            Err(err) => error!("Ack error: {:?}", err),
+                        },
+                        Err(err) => {
+                            error!("Socket error during emit with ack: {:?}", err);
+                        }
+                    }
+                } else {
+                    debug!("Emitting frame without acknowledgment");
 
-                match io
-                    .to("broadcast")
-                    .timeout(timeout)
-                    .emit_with_ack::<Bytes, Value>(
-                        "frame:broadcast:ack",
+                    // Emit the frame without acknowledgment
+                    match io.to("broadcast").emit::<Bytes>(
+                        "frame:broadcast",
                         &bytes,
-                    ) {
-                    Ok(ack_stream) => match ack_stream.await {
+                    ).await {
                         Ok(_) => debug!(
-                            "Ack received for frame with presentation time: {}",
+                            "Frame emitted without acknowledgment with presentation time: {}",
                             frame.presentation_time
                         ),
-                        Err(err) => error!("Ack error: {:?}", err),
-                    },
-                    Err(err) => {
-                        error!("Socket error during emit with ack: {:?}", err);
+                        Err(err) => error!("Socket error during emit without ack: {:?}", err),
                     }
                 }
             });
-        } else {
-            debug!("Emitting frame without acknowledgment");
-
-            // Emit the frame without acknowledgment
-            match io.to("broadcast").emit::<Bytes>(
-                "frame:broadcast",
-                &bytes,
-            ) {
-                Ok(_) => debug!(
-                    "Frame emitted without acknowledgment with presentation time: {}",
-                    frame.presentation_time
-                ),
-                Err(err) => error!("Socket error during emit without ack: {:?}", err),
-            }
-        }
     }
 
     fn set_fps(&self, fps: u32) {

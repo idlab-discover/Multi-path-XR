@@ -1,4 +1,4 @@
-use crate::{graph::{Graph, Link}, handlers::environment::{DockerHandler, EnvironmentHandler, MininetHandler, VirtualWallHandler}, metrics_logger::MetricsLogger, structs::ExperimentFile};
+use crate::{graph::{Graph, Link}, handlers::environment::{DockerHandler, EnvironmentHandler, MininetHandler, VirtualWallHandler}, metrics_logger::{MetricsLogger, MetricsLoggerError}, structs::ExperimentFile};
 use std::{collections::HashMap, sync::Arc};
 use serde_json::Value;
 use socketioxide::SocketIo;
@@ -53,15 +53,28 @@ impl ExperimentHandler {
         self.current_experiment.clone()
     }
 
+    pub async fn get_latest_metrics(
+        &self,
+        instance: &str,
+        metric: &str,
+        n: usize,
+    ) -> Result<Vec<(i64, f64)>, MetricsLoggerError> {
+        if let Some(logger) = &self.metrics_logger {
+            logger.get_last_n(instance, metric, n).await
+        } else {
+            Err(MetricsLoggerError::LoggerNotInitialized)
+        }
+    }
+
     pub async fn start_environment(&mut self, env: &str, experiment_filename: &str, io: Arc<SocketIo>) -> Result<String, String> {
         let handler = self.handlers.get(env);
         if handler.is_none() {
-            return Err(format!("Environment '{}' is not supported", env));
+            return Err(format!("Environment '{env}' is not supported"));
         }
         let handler = handler.unwrap();
         self.active_environment = Some(env.to_string());
 
-        let path = format!("./dist/experiments/{}", experiment_filename);
+        let path = format!("./dist/experiments/{experiment_filename}");
         let contents = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {e}"))?;
         let mut parsed: ExperimentFile = serde_yaml::from_str(&contents)
                     .map_err(|e| format!("Failed to parse YAML: {e}"))?;
@@ -78,13 +91,14 @@ impl ExperimentHandler {
         let n_paths = parsed.environment.number_of_paths;
         let n_nodes = parsed.environment.number_of_nodes;
     
-        let options = format!("n_nodes={}&n_paths={}", n_nodes, n_paths);
+        let options = format!("n_nodes={n_nodes}&n_paths={n_paths}");
 
         self.current_experiment = Some(parsed);
 
         let result = handler.start(&options).await;
         if result.is_ok() {
             if let Some(experiment) = self.current_experiment.clone() {
+                // TODO: allow the logger to be disabled from the yaml
                 let logger = MetricsLogger::new(experiment_filename).await.map_err(|e| format!("{e:?}"))?;
                 logger.clone().start().await.map_err(|e| format!("{e:?}"))?;
                 self.metrics_logger = Some(logger);
@@ -94,9 +108,9 @@ impl ExperimentHandler {
                     self.action_executor = Some(executor); // <- Store the executor
                 }
             }
-            Ok(format!("Environment '{}' started successfully", env))
+            Ok(format!("Environment '{env}' started successfully"))
         } else {
-            Err(format!("Failed to start environment '{}': {}", env, result.unwrap_err()))
+            Err(format!("Failed to start environment '{env}': {}", result.unwrap_err()))
         }
     }
 

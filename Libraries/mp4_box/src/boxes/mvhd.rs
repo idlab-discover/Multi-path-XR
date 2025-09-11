@@ -65,13 +65,16 @@ impl std::fmt::Debug for MvhdBox {
 }
 
 impl Mp4Box for MvhdBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"mvhd" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let time_fields_size = if self.version == 1 { 28 } else { 16 };
         8 + 4 + time_fields_size + 80  // header + version/flags + time fields + rest
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

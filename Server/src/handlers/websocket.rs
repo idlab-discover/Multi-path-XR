@@ -28,7 +28,7 @@ pub struct CleanSocketsRequest {
 pub async fn list_sockets(
     State(app_state): State<AppState>,
 ) -> Json<SimpleSocketsResponse> {
-    let sockets = app_state.socket_io.sockets().unwrap_or_default();
+    let sockets = app_state.socket_io.sockets();
     let mut simple_sockets = Vec::<SimpleSocket>::new();
     for socket in sockets {
         simple_sockets.push(SimpleSocket {
@@ -47,7 +47,7 @@ pub async fn clean_sockets(
     Query(query): Query<CleanSocketsRequest>,
     State(app_state): State<AppState>,
 ) -> Json<SimpleSocketsResponse> {
-    let all_sockets = app_state.socket_io.sockets().unwrap_or_default();
+    let all_sockets = app_state.socket_io.sockets();
     let mut cleaned_sockets = Vec::<SimpleSocket>::new();
     let socket_to_clean = query.sockets;
     for socket in all_sockets {
@@ -81,7 +81,7 @@ pub fn create_websocket_router_layer(stream_manager: Arc<services::stream_manage
         socket.on_disconnect(move |socket: SocketRef, reason: DisconnectReason| async move {
             let stream_manager = Arc::clone(&stream_manager_clone);
             info!("Socket {} on ns {} disconnected, reason: {:?}", socket.id, socket.ns(), reason);
-            socket.leave("broadcast").unwrap();
+            socket.leave("broadcast");
 
             // Clean up our data channels
             {
@@ -99,13 +99,13 @@ pub fn create_websocket_router_layer(stream_manager: Arc<services::stream_manage
         // Setup websocket ingress
         let socket_id_clone = socket_id.clone();
         let stream_manager_clone = Arc::clone(&stream_manager);
-        let stream_id = format!("ws_{}", socket_id_clone);
+        let stream_id = format!("ws_{socket_id_clone}");
         if let Some(ws_ingress) = stream_manager_clone.get_websocket_ingress() {
             ws_ingress.add_socket(stream_id.clone(), socket.clone().into());
         };
 
         // Setup websocket egress
-        let _ = socket.join("broadcast"); // Join the broadcast room
+        socket.join("broadcast"); // Join the broadcast room
 
         // 1) Client -> Server: "webrtc_offer"
         //    Contains { sdp, client_id }
@@ -182,8 +182,10 @@ pub fn create_websocket_router_layer(stream_manager: Arc<services::stream_manage
                             }
                             */
 
+                            // We should notify the client of all the groups that are currently available
                             if let Some(buffer_egress) = stream_manager.get_buffer_egress() {
                                 let groups = buffer_egress.get_groups();
+                                info!("Sending groups to client: {:?}", groups);
                                 for group in groups {
                                     let group_id = group.clone();
                                     let _ = socket.emit("mpd::group_id", &group_id);

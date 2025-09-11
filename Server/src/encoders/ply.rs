@@ -6,7 +6,7 @@ use std::error::Error;
 
 #[instrument(skip_all)]
 pub fn encode_ply(point_cloud: PointCloudData) -> Result<Vec<u8>, Box<dyn Error>> {
-    let mut buf = Vec::<u8>::new();
+    let mut buf = Vec::<u8>::with_capacity(point_cloud.points.len() * 6); // Preallocate buffer size based on expected number of points
 
     // Create a ply object
     let mut ply = Ply::<DefaultElement>::new();

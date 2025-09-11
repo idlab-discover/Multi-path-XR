@@ -64,6 +64,7 @@ impl std::fmt::Debug for TfhdBox {
 // Implementation of the `Mp4Box` trait for the `TfhdBox` struct.
 impl Mp4Box for TfhdBox {
     // Returns the box type as a 4-byte array. For `TfhdBox`, the type is "tfhd".
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"tfhd" }
 
     // Calculates the size of the `TfhdBox` in bytes.
@@ -71,6 +72,7 @@ impl Mp4Box for TfhdBox {
     // - 8 bytes for the header (4 bytes for size and 4 bytes for type).
     // - 4 bytes for the version and flags.
     // - 4 bytes for the `track_id` field.
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let mut size = 8 + 4 + 4; // header + version/flags + track_id
         if self.flags & 0x000001 != 0 { size += 8; }  // base_data_offset
@@ -83,6 +85,7 @@ impl Mp4Box for TfhdBox {
 
     // Writes the `TfhdBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `track_id` into the buffer.
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

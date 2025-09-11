@@ -51,13 +51,16 @@ impl std::fmt::Debug for ElstEntry {
 
 // Implementation of the `Mp4Box` trait for the `ElstBox` struct.
 impl Mp4Box for ElstBox {
+    #[inline(always)]
     fn box_type(&self) -> [u8; 4] { *b"elst" }
 
+    #[inline(always)]
     fn box_size(&self) -> u32 {
         let entry_size = if self.version == 1 { 20 } else { 12 };
         8 + 4 + (self.entries.len() as u32 * entry_size)
     }
 
+    #[inline]
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());

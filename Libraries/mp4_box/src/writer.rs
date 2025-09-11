@@ -60,60 +60,62 @@ pub fn create_init_segment(config: &Mp4StreamConfig) -> Vec<u8> {
 }
 
 
+#[inline]
 pub fn create_media_segment(
     config: &Mp4StreamConfig,
-    frame_data: &[u8],
+    frame_data: Vec<u8>,
     sequence_number: u32,
     base_decode_time: u64
 ) -> Vec<u8> {
-    let mut segment = Vec::new();
 
-    // 1) Write STYP Box
+    // 1) Create STYP Box
     let styp = StypBox::default();
-    styp.write_box(&mut segment);
 
     // 2) Initialize MOOF Box with defaults
     let mut moof = MoofBox::default();
 
-    // -- Set dynamic fields --
+    // 2.1) Set dynamic fields
     moof.mfhd.sequence_number = sequence_number;
-    moof.trafs.push(TrafBox::default());
-    moof.trafs[0].tfhd.track_id = config.track_id;
-    if let Some (tfdt) = moof.trafs[0].tfdt.as_mut() {
+
+    // 3) Create TRAK Box
+    let mut traf = TrafBox::default();
+    traf.tfhd.track_id = config.track_id;
+    if let Some(tfdt) = traf.tfdt.as_mut() {
         tfdt.base_decode_time = base_decode_time;
     }
-
-    if let Some(trun) = moof.trafs[0].trun.as_mut() {
+    if let Some(trun) = traf.trun.as_mut() {
         trun.sample_size = frame_data.len() as u32;
-
-        // Placeholder for data_offset for now
-        trun.data_offset = 0;
+        trun.data_offset = 0;  // Placeholder, will be updated later
     }
+    // 4) Add TRAK Box to MOOF
+    moof.trafs.push(traf);
 
-    // 3) Serialize MOOF to temporary buffer
-    let mut moof_buffer = Vec::new();
-    moof.write_box(&mut moof_buffer);
-
+    // Now that we have the final size of the MOOF box, we can set the data offset in the TRUN box
+    // 5) Set data offset for TRUN
+    let moof_box_size = moof.box_size();
     if let Some(trun) = moof.trafs[0].trun.as_mut() {
-        // 4) Calculate correct data_offset
-        let data_offset = moof_buffer.len() as i32 + 8;  // 8 bytes for mdat header
-        // Update trun.data_offset
-        trun.data_offset = data_offset;
-        // 5) Re-serialize MOOF with correct offset
-        moof_buffer.clear();
-        moof.write_box(&mut moof_buffer);
+        trun.data_offset = moof_box_size as i32 + 8; // 8-byte MDAT hdr
     }
 
-    // 6) Create MDAT Box
+    // 6) Create MDAT Box with frame data
     let mdat = MdatBox {
-        data: frame_data.to_vec(),  // Copy frame data into MDAT
+        data: frame_data.clone(),
     };
-    let mut mdat_buffer = Vec::new();
-    mdat.write_box(&mut mdat_buffer);
 
-    // 7) Combine MOOF + MDAT
-    segment.extend_from_slice(&moof_buffer);
-    segment.extend_from_slice(&mdat_buffer);
+    // 6) Exact capacity: one allocation, zero growth
+    let capacity = styp.box_size() as usize
+        + moof.box_size() as usize
+        + mdat.box_size() as usize;
+
+    // 7) Create segment buffer
+    let mut segment = Vec::with_capacity(capacity);
+
+    // 8) Serialize directly into the final buffer
+    styp.write_box(&mut segment);          // STYP
+    moof.write_box(&mut segment);          // MOOF
+    mdat.write_box(&mut segment);          // MDAT
+
+    debug_assert_eq!(segment.len(), capacity);
 
     segment
 }
