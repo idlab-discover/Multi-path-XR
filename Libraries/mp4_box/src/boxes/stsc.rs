@@ -14,7 +14,8 @@ use super::generic::Mp4Box;
 // The `StscBox` is essential for enabling efficient access to media samples, as it provides the mapping
 // between sample indices and their corresponding chunks.
 #[derive(Clone)]
-pub struct StscBox { // Sample-to-Chunk Box
+pub struct StscBox {
+    // Sample-to-Chunk Box
     pub version: u8,
     pub flags: u32,
     pub entries: Vec<StscEntry>,
@@ -76,7 +77,9 @@ impl std::fmt::Debug for StscEntry {
 impl Mp4Box for StscBox {
     // Returns the box type as a 4-byte array. For `StscBox`, the type is "stsc".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"stsc" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"stsc"
+    }
 
     // Calculates the size of the `StscBox` in bytes.
     // The size is fixed at 16 bytes, which includes:
@@ -85,9 +88,9 @@ impl Mp4Box for StscBox {
     // - 4 bytes for the `entry_count` field.
     // - 4 bytes for each entry in the `entries` vector.
     #[inline(always)]
-    fn box_size(&self) -> u32 { 
+    fn box_size(&self) -> u32 {
         8 + 4 + 4 + (12 * self.entries.len() as u32)
-     }
+    }
 
     // Writes the `StscBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `entry_count` into the buffer.
@@ -99,7 +102,7 @@ impl Mp4Box for StscBox {
         buffer.extend_from_slice(&self.box_type());
         // Write the version (1 byte) and flags (3 bytes).
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // flags (24 bits)
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // flags (24 bits)
 
         buffer.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
 
@@ -134,18 +137,27 @@ impl Mp4Box for StscBox {
         let mut entries = Vec::with_capacity(entry_count as usize);
         let mut offset = 16;
         for _ in 0..entry_count {
-            let first_chunk = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
-            let samples_per_chunk = u32::from_be_bytes(data[offset+4..offset+8].try_into().unwrap());
-            let sample_description_index = u32::from_be_bytes(data[offset+8..offset+12].try_into().unwrap());
+            let first_chunk = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+            let samples_per_chunk =
+                u32::from_be_bytes(data[offset + 4..offset + 8].try_into().unwrap());
+            let sample_description_index =
+                u32::from_be_bytes(data[offset + 8..offset + 12].try_into().unwrap());
             entries.push(StscEntry {
                 first_chunk,
                 samples_per_chunk,
                 sample_description_index,
-                first_sample: 0,  // Will be computed if needed
+                first_sample: 0, // Will be computed if needed
             });
             offset += 12;
         }
 
-        Ok((StscBox { version, flags, entries }, size))
+        Ok((
+            StscBox {
+                version,
+                flags,
+                entries,
+            },
+            size,
+        ))
     }
 }

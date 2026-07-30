@@ -1,5 +1,5 @@
-use crate::format_fourcc;
 use super::generic::Mp4Box;
+use crate::format_fourcc;
 
 /// The `Co64Box` (Chunk Offset Box - 64-bit) provides the file offsets for each chunk.
 /// This box is used when 32-bit offsets (stco) are insufficient.
@@ -8,21 +8,11 @@ use super::generic::Mp4Box;
 /// - `version`: Full box version (always 0 per spec, but kept configurable).
 /// - `flags`: Full box flags (24 bits used, typically 0).
 /// - `entries`: A list of 64-bit chunk offsets.
-#[derive(Clone)]
+#[derive(Clone, Default)] // Everything defaults to 0/empty/false
 pub struct Co64Box {
-    pub version: u8,        // Full box version (should be 0)
-    pub flags: u32,         // Full box flags (24 bits)
-    pub entries: Vec<u64>,  // 64-bit chunk offsets
-}
-
-impl Default for Co64Box {
-    fn default() -> Self {
-        Co64Box {
-            version: 0,
-            flags: 0,
-            entries: Vec::new(),
-        }
-    }
+    pub version: u8,       // Full box version (should be 0)
+    pub flags: u32,        // Full box flags (24 bits)
+    pub entries: Vec<u64>, // 64-bit chunk offsets
 }
 
 impl std::fmt::Debug for Co64Box {
@@ -39,7 +29,9 @@ impl std::fmt::Debug for Co64Box {
 
 impl Mp4Box for Co64Box {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"co64" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"co64"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -54,7 +46,7 @@ impl Mp4Box for Co64Box {
 
         // Write version and flags (flags is 24 bits)
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // Only last 3 bytes
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // Only last 3 bytes
 
         // Write number of entries
         buffer.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
@@ -93,14 +85,18 @@ impl Mp4Box for Co64Box {
         let mut entries = Vec::with_capacity(entry_count as usize);
         let mut offset = 16;
         for _ in 0..entry_count {
-            let chunk_offset = u64::from_be_bytes(data[offset..offset+8].try_into().unwrap());
+            let chunk_offset = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
             entries.push(chunk_offset);
             offset += 8;
         }
 
         Ok((
-            Co64Box { version, flags, entries },
-            size
+            Co64Box {
+                version,
+                flags,
+                entries,
+            },
+            size,
         ))
     }
 }

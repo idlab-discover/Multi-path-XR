@@ -1,19 +1,21 @@
-use crate::boxes::{ftyp::FtypBox, generic::Mp4Box, mdat::MdatBox, moof::MoofBox, moov::MoovBox, styp::StypBox, traf::TrafBox, trak::TrakBox, vmhd::VmhdBox};
+use crate::boxes::{
+    ftyp::FtypBox, generic::Mp4Box, mdat::MdatBox, moof::MoofBox, moov::MoovBox, styp::StypBox,
+    traf::TrafBox, trak::TrakBox, vmhd::VmhdBox,
+};
 
 #[derive(Clone, Debug)]
 pub struct Mp4StreamConfig {
-    pub track_id: u32,                  // Unique track identifier
-    pub timescale: u32,                 // Typically fps * 1000
-    pub default_sample_duration: u32,   // e.g., 1000 for fixed frame durations
-    pub codec_fourcc: [u8; 4],          // Custom codec, e.g., *b\"pcvc\"
-    pub codec_name: String,             // Descriptive codec name
-    pub width: u16,                     // Video width in pixels
-    pub height: u16,                    // Video height in pixels
+    pub track_id: u32,                // Unique track identifier
+    pub timescale: u32,               // Typically fps * 1000
+    pub default_sample_duration: u32, // e.g., 1000 for fixed frame durations
+    pub codec_fourcc: [u8; 4],        // Custom codec, e.g., *b\"pcvc\"
+    pub codec_name: String,           // Descriptive codec name
+    pub width: u16,                   // Video width in pixels
+    pub height: u16,                  // Video height in pixels
 }
 
-
 pub fn create_init_segment(config: &Mp4StreamConfig) -> Vec<u8> {
-    let mut buffer = Vec::with_capacity(2048);  // Pre-allocate for efficiency
+    let mut buffer = Vec::with_capacity(2048); // Pre-allocate for efficiency
 
     // 1) Write FTYP Box
     let ftyp = FtypBox::default();
@@ -59,15 +61,13 @@ pub fn create_init_segment(config: &Mp4StreamConfig) -> Vec<u8> {
     buffer
 }
 
-
 #[inline]
 pub fn create_media_segment(
     config: &Mp4StreamConfig,
     frame_data: Vec<u8>,
     sequence_number: u32,
-    base_decode_time: u64
+    base_decode_time: u64,
 ) -> Vec<u8> {
-
     // 1) Create STYP Box
     let styp = StypBox::default();
 
@@ -85,7 +85,7 @@ pub fn create_media_segment(
     }
     if let Some(trun) = traf.trun.as_mut() {
         trun.sample_size = frame_data.len() as u32;
-        trun.data_offset = 0;  // Placeholder, will be updated later
+        trun.data_offset = 0; // Placeholder, will be updated later
     }
     // 4) Add TRAK Box to MOOF
     moof.trafs.push(traf);
@@ -103,17 +103,15 @@ pub fn create_media_segment(
     };
 
     // 6) Exact capacity: one allocation, zero growth
-    let capacity = styp.box_size() as usize
-        + moof.box_size() as usize
-        + mdat.box_size() as usize;
+    let capacity = styp.box_size() as usize + moof.box_size() as usize + mdat.box_size() as usize;
 
     // 7) Create segment buffer
     let mut segment = Vec::with_capacity(capacity);
 
     // 8) Serialize directly into the final buffer
-    styp.write_box(&mut segment);          // STYP
-    moof.write_box(&mut segment);          // MOOF
-    mdat.write_box(&mut segment);          // MDAT
+    styp.write_box(&mut segment); // STYP
+    moof.write_box(&mut segment); // MOOF
+    mdat.write_box(&mut segment); // MDAT
 
     debug_assert_eq!(segment.len(), capacity);
 

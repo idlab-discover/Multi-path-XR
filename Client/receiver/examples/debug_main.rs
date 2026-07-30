@@ -14,10 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use interoptopus::patterns::{
-    slice::FFISlice,
-    string::AsciiPointer,
-};
+use interoptopus::patterns::{slice::FFISlice, string::AsciiPointer};
 use pc_receiver::ffi::{
     consume_frame, destroy, get_stream_ids, ingress_subscribe, ingress_unsubscribe, init,
     register_debug_callback, unregister_debug_callback, DebugCallback, SubscriptionCallback,
@@ -37,9 +34,9 @@ fn slice_from_bytes(bytes: &[u8]) -> FFISlice<'_, u8> {
 
 #[derive(Default, Clone)]
 struct Stats {
-    last_pts:  u64,
-    points:    u64,          // last frame’s point-count
-    frames:    u64,          // frames seen in current window
+    last_pts: u64,
+    points: u64, // last frame’s point-count
+    frames: u64, // frames seen in current window
 }
 type StatsMap = Arc<Mutex<HashMap<String, Stats>>>;
 
@@ -91,8 +88,8 @@ extern "C" fn frame_cb(
     let mut map = STATS.lock().unwrap();
     let entry = map.entry(id).or_default();
     entry.last_pts = presentation_time;
-    entry.points   = point_count;
-    entry.frames  += 1;
+    entry.points = point_count;
+    entry.frames += 1;
 
     // ❷ still print decoding errors immediately
     if error_count > 0 {
@@ -113,7 +110,7 @@ fn dump_threads() -> std::io::Result<()> {
     use std::{fs, io::Read, path::PathBuf};
 
     println!("\n───────── live threads ─────────");
-    println!("{:<8} │ {:<20} │ {}", "TID", "STATE", "NAME");
+    println!("{:<8} │ {:<20} │ NAME", "TID", "STATE");
     println!("─────────┼──────────────────────┼───────────────────────────────");
 
     // Every sub-directory of /proc/self/task is a thread-id (TID)
@@ -131,9 +128,15 @@ fn dump_threads() -> std::io::Result<()> {
         let mut name = "<unknown>".to_string();
         let mut state = "<unknown>".to_string();
         for line in contents.lines() {
-            if line.starts_with("Name:")   { name  = line[5..].trim().to_owned(); }
-            if line.starts_with("State:")  { state = line[6..].trim().to_owned(); }
-            if name != "<unknown>" && state != "<unknown>" { break; }
+            if let Some(s) = line.strip_prefix("Name:") {
+                name = s.trim().to_owned();
+            }
+            if let Some(s) = line.strip_prefix("State:") {
+                state = s.trim().to_owned();
+            }
+            if name != "<unknown>" && state != "<unknown>" {
+                break;
+            }
         }
 
         println!("{:<8} │ {:<20} │ {}", tid, state, name);
@@ -144,7 +147,7 @@ fn dump_threads() -> std::io::Result<()> {
 
 #[cfg(not(target_os = "linux"))]
 fn dump_threads() -> std::io::Result<()> {
-    // Fallback: nothing to do on non-Linux – feel free to add a Windows / macOS impl.
+    // Fallback: nothing to do on non-Linux - feel free to add a Windows / macOS impl.
     Ok(())
 }
 
@@ -152,22 +155,49 @@ fn dump_threads() -> std::io::Result<()> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     /* ─── tiny CLI ─── */
-    let mut server = "http://localhost:3001".to_string();
+    let mut http_url = "http://localhost:3001".to_string();
+    let mut websocket_url = "http://localhost:3001".to_string();
     let mut mcast = "udp://239.0.0.1:40085".to_string();
+    let mut moq_url = String::new();
+    let mut moq_namespace = "multipathxr".to_string();
+    let mut moq_bind = "[::]:0".to_string();
+    let mut moq_tls_cert = String::new();
+    let mut moq_tls_key = String::new();
+    let mut moq_tls_root = String::new();
+    let mut moq_tls_disable_verify = true;
     let mut level = 2u32;
 
     let mut it = env::args();
     while let Some(arg) = it.next() {
         match arg.as_str() {
-            "--server-url" => server = it.next().unwrap_or(server),
+            "--http-url" => http_url = it.next().unwrap_or(http_url),
+            "--websocket-url" => websocket_url = it.next().unwrap_or(websocket_url),
             "--multicast-url" => mcast = it.next().unwrap_or(mcast),
+            "--moq-url" => moq_url = it.next().unwrap_or(moq_url),
+            "--moq-namespace" => moq_namespace = it.next().unwrap_or(moq_namespace),
+            "--moq-bind" => moq_bind = it.next().unwrap_or(moq_bind),
+            "--moq-tls-cert" => moq_tls_cert = it.next().unwrap_or(moq_tls_cert),
+            "--moq-tls-key" => moq_tls_key = it.next().unwrap_or(moq_tls_key),
+            "--moq-tls-root" => moq_tls_root = it.next().unwrap_or(moq_tls_root),
+            "--moq-tls-disable-verify" => {
+                let value = it.next().unwrap_or_else(|| "true".to_string());
+                moq_tls_disable_verify = matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                );
+            }
             "--log-level" => level = it.next().and_then(|s| s.parse().ok()).unwrap_or(level),
             _ => {}
         }
     }
 
-    println!("🟢  server     {server}");
+    println!("🟢  http-url   {http_url}");
+    println!("🟢  websocket-url {websocket_url}");
     println!("🟢  multicast  {mcast}");
+    println!("🟢  moq-url    {moq_url}");
+    println!("🟢  moq-namespace {moq_namespace}");
+    println!("🟢  moq-bind   {moq_bind}");
+    println!("🟢  moq-tls-disable-verify {moq_tls_disable_verify}");
     println!("🟢  log-level  {level}");
 
     /* ─── register FFI callbacks ─── */
@@ -175,12 +205,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ingress_subscribe(SubscriptionCallback::new(frame_cb));
 
     /* ─── start the receiver ─── */
-    let server_c = std::ffi::CString::new(server)?;
-    let mcast_c  = std::ffi::CString::new(mcast )?;
+    let http_url_c = std::ffi::CString::new(http_url)?;
+    let websocket_url_c = std::ffi::CString::new(websocket_url)?;
+    let mcast_c = std::ffi::CString::new(mcast)?;
+    let moq_url_c = std::ffi::CString::new(moq_url)?;
+    let moq_namespace_c = std::ffi::CString::new(moq_namespace)?;
+    let moq_bind_c = std::ffi::CString::new(moq_bind)?;
+    let moq_tls_cert_c = std::ffi::CString::new(moq_tls_cert)?;
+    let moq_tls_key_c = std::ffi::CString::new(moq_tls_key)?;
+    let moq_tls_root_c = std::ffi::CString::new(moq_tls_root)?;
     init(
         level,
-        AsciiPointer::from_cstr(&server_c),
+        AsciiPointer::from_cstr(&http_url_c),
+        AsciiPointer::from_cstr(&websocket_url_c),
         AsciiPointer::from_cstr(&mcast_c),
+        AsciiPointer::from_cstr(&moq_url_c),
+        AsciiPointer::from_cstr(&moq_namespace_c),
+        AsciiPointer::from_cstr(&moq_bind_c),
+        AsciiPointer::from_cstr(&moq_tls_cert_c),
+        AsciiPointer::from_cstr(&moq_tls_key_c),
+        AsciiPointer::from_cstr(&moq_tls_root_c),
+        moq_tls_disable_verify,
     );
 
     /* ─── thread: poll stream list ─── */
@@ -217,7 +262,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .name("live_dashboard".to_string())
         .spawn(|| {
             let mut last_refresh = Instant::now();
-            let mut last_counts  = HashMap::<String, u64>::new();
+            let mut last_counts = HashMap::<String, u64>::new();
 
             while !SHUTTING_DOWN.load(Ordering::SeqCst) {
                 thread::sleep(Duration::from_millis(250));
@@ -229,13 +274,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                     for (id, s) in stats {
                         let prev = last_counts.insert(id.clone(), s.frames);
-                        let fps  = match prev { Some(p) => (s.frames - p) as f32, None => s.frames as f32 };
+                        let fps = match prev {
+                            Some(p) => (s.frames - p) as f32,
+                            None => s.frames as f32,
+                        };
                         lines.push((id, fps, s.points));
                     }
 
                     // ── render ──────────────────────────────────────
                     if !lines.is_empty() {
-                        print!("\x1b[2J\x1b[H");          // clear screen
+                        print!("\x1b[2J\x1b[H"); // clear screen
                         println!("──────── live streams ────────");
                         println!("{:<16} │ {:>6} │ POINTS", "STREAM", "FPS");
                         println!("──────────────────────────────");

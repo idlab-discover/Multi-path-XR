@@ -24,7 +24,9 @@ impl std::fmt::Debug for DinfBox {
 impl Mp4Box for DinfBox {
     // Returns the box type as a 4-byte array. For `DinfBox`, the type is "dinf".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"dinf" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"dinf"
+    }
 
     // Calculates the size of the `DinfBox` in bytes.
     // The size includes 8 bytes for the header (4 bytes for size and 4 bytes for type)
@@ -47,9 +49,12 @@ impl Mp4Box for DinfBox {
         let dref_size = self.dref.box_size() as usize;
         self.dref.write_box(buffer);
         if buffer.len() != current_size + dref_size {
-            panic!("Error writing DrefBox: expected size {}, got {}", dref_size, buffer.len() - current_size);
+            panic!(
+                "Error writing DrefBox: expected size {}, got {}",
+                dref_size,
+                buffer.len() - current_size
+            );
         }
-
     }
 
     // Reads a `DinfBox` from the provided dat buffer.

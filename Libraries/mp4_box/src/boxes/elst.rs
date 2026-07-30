@@ -10,7 +10,8 @@ use super::generic::Mp4Box;
 /// - `flags`: 24-bit flags (typically unused).
 /// - `entries`: List of edit entries, each specifying a segment duration, media time, and playback rate.
 #[derive(Default, Clone)]
-pub struct ElstBox { // Edit List Box
+pub struct ElstBox {
+    // Edit List Box
     pub version: u8,
     pub flags: u32,
     pub entries: Vec<ElstEntry>, // List of edit entries
@@ -52,7 +53,9 @@ impl std::fmt::Debug for ElstEntry {
 // Implementation of the `Mp4Box` trait for the `ElstBox` struct.
 impl Mp4Box for ElstBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"elst" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"elst"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -102,18 +105,24 @@ impl Mp4Box for ElstBox {
         for _ in 0..entry_count {
             let (segment_duration, media_time) = if version == 1 {
                 (
-                    u64::from_be_bytes(data[offset..offset+8].try_into().unwrap()),
-                    u64::from_be_bytes(data[offset+8..offset+16].try_into().unwrap()),
+                    u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap()),
+                    u64::from_be_bytes(data[offset + 8..offset + 16].try_into().unwrap()),
                 )
             } else {
                 (
-                    u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as u64,
-                    u32::from_be_bytes(data[offset+4..offset+8].try_into().unwrap()) as u64,
+                    u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as u64,
+                    u32::from_be_bytes(data[offset + 4..offset + 8].try_into().unwrap()) as u64,
                 )
             };
-            let rate_offset = if version == 1 { offset + 16 } else { offset + 8 };
-            let media_rate = u16::from_be_bytes(data[rate_offset..rate_offset+2].try_into().unwrap());
-            let media_rate_fraction = u16::from_be_bytes(data[rate_offset+2..rate_offset+4].try_into().unwrap());
+            let rate_offset = if version == 1 {
+                offset + 16
+            } else {
+                offset + 8
+            };
+            let media_rate =
+                u16::from_be_bytes(data[rate_offset..rate_offset + 2].try_into().unwrap());
+            let media_rate_fraction =
+                u16::from_be_bytes(data[rate_offset + 2..rate_offset + 4].try_into().unwrap());
 
             entries.push(ElstEntry {
                 segment_duration,
@@ -126,8 +135,12 @@ impl Mp4Box for ElstBox {
         }
 
         Ok((
-            ElstBox { version, flags, entries },
-            size
+            ElstBox {
+                version,
+                flags,
+                entries,
+            },
+            size,
         ))
     }
 }

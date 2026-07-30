@@ -14,11 +14,12 @@ use super::{edts::EdtsBox, generic::Mp4Box, mdia::MdiaBox, meta::MetaBox, tkhd::
 // - `MetaBox`: (Optional) Metadata specific to the track.
 // - `mdia`: An instance of `MdiaBox` representing the media information.
 #[derive(Default, Clone)]
-pub struct TrakBox { // Track Box
-    pub tkhd: TkhdBox, // Track Header Box
+pub struct TrakBox {
+    // Track Box
+    pub tkhd: TkhdBox,         // Track Header Box
     pub edts: Option<EdtsBox>, // Optional Edit Box
     pub meta: Option<MetaBox>, // Optional Metadata Box
-    pub mdia: MdiaBox, // Media Box
+    pub mdia: MdiaBox,         // Media Box
 }
 
 impl std::fmt::Debug for TrakBox {
@@ -34,12 +35,13 @@ impl std::fmt::Debug for TrakBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `TrakBox` struct.
 impl Mp4Box for TrakBox {
     // Returns the box type as a 4-byte array. For `TrakBox`, the type is "trak".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"trak" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"trak"
+    }
 
     // Calculates the size of the `TrakBox` in bytes.
     // The size includes:
@@ -71,7 +73,11 @@ impl Mp4Box for TrakBox {
         let tkhd_size = self.tkhd.box_size() as usize;
         self.tkhd.write_box(buffer);
         if buffer.len() != current_size + tkhd_size {
-            panic!("Error writing TkhdBox: expected size {}, got {}", tkhd_size, buffer.len() - current_size);
+            panic!(
+                "Error writing TkhdBox: expected size {}, got {}",
+                tkhd_size,
+                buffer.len() - current_size
+            );
         }
 
         if let Some(ref edts) = self.edts {
@@ -79,7 +85,11 @@ impl Mp4Box for TrakBox {
             let edts_size = edts.box_size() as usize;
             edts.write_box(buffer);
             if buffer.len() != current_size + edts_size {
-                panic!("Error writing EdtsBox: expected size {}, got {}", edts_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing EdtsBox: expected size {}, got {}",
+                    edts_size,
+                    buffer.len() - current_size
+                );
             }
         }
 
@@ -88,7 +98,11 @@ impl Mp4Box for TrakBox {
             let meta_size = meta.box_size() as usize;
             meta.write_box(buffer);
             if buffer.len() != current_size + meta_size {
-                panic!("Error writing MetaBox: expected size {}, got {}", meta_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing MetaBox: expected size {}, got {}",
+                    meta_size,
+                    buffer.len() - current_size
+                );
             }
         }
 
@@ -96,7 +110,11 @@ impl Mp4Box for TrakBox {
         let mdia_size = self.mdia.box_size() as usize;
         self.mdia.write_box(buffer);
         if buffer.len() != current_size + mdia_size {
-            panic!("Error writing MdiaBox: expected size {}, got {}", mdia_size, buffer.len() - current_size);
+            panic!(
+                "Error writing MdiaBox: expected size {}, got {}",
+                mdia_size,
+                buffer.len() - current_size
+            );
         }
     }
 
@@ -116,8 +134,9 @@ impl Mp4Box for TrakBox {
         let mut mdia = None;
 
         while offset + 8 <= size {
-            let sub_size = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
-            let sub_type = &data[offset+4..offset+8];
+            let sub_size =
+                u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let sub_type = &data[offset + 4..offset + 8];
 
             if offset + sub_size > size || sub_size < 8 {
                 return Err("Invalid sub-box size inside TRAK".into());
@@ -128,7 +147,8 @@ impl Mp4Box for TrakBox {
                     if tkhd.is_some() {
                         return Err("Duplicate TKHD box inside TRAK".into());
                     }
-                    let (parsed, parsed_size) = TkhdBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        TkhdBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect TKHD box size".into());
                     }
@@ -138,7 +158,8 @@ impl Mp4Box for TrakBox {
                     if edts.is_some() {
                         return Err("Duplicate EDTS box inside TRAK".into());
                     }
-                    let (parsed, parsed_size) = EdtsBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        EdtsBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect EDTS box size".into());
                     }
@@ -148,7 +169,8 @@ impl Mp4Box for TrakBox {
                     if meta.is_some() {
                         return Err("Duplicate META box inside TRAK".into());
                     }
-                    let (parsed, parsed_size) = MetaBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        MetaBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect META box size".into());
                     }
@@ -158,7 +180,8 @@ impl Mp4Box for TrakBox {
                     if mdia.is_some() {
                         return Err("Duplicate MDIA box inside TRAK".into());
                     }
-                    let (parsed, parsed_size) = MdiaBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        MdiaBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect MDIA box size".into());
                     }
@@ -186,7 +209,7 @@ impl Mp4Box for TrakBox {
                 meta,
                 mdia: mdia.unwrap(),
             },
-            size
+            size,
         ))
     }
 }

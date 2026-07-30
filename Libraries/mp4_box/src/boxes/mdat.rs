@@ -9,8 +9,9 @@ use super::generic::Mp4Box;
 // Fields:
 // - `data`: A vector of bytes representing the raw encoded media data.
 #[derive(Default, Clone)]
-pub struct MdatBox { // Media Data Box
-    pub data: Vec<u8>,   // The raw encoded frame
+pub struct MdatBox {
+    // Media Data Box
+    pub data: Vec<u8>, // The raw encoded frame
 }
 
 impl std::fmt::Debug for MdatBox {
@@ -27,7 +28,9 @@ impl std::fmt::Debug for MdatBox {
 impl Mp4Box for MdatBox {
     // Returns the box type as a 4-byte array. For `MdatBox`, the type is "mdat".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mdat" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mdat"
+    }
 
     // Calculates the size of the `MdatBox` in bytes.
     // The size includes:
@@ -67,9 +70,6 @@ impl Mp4Box for MdatBox {
 
         let payload = data[8..size].to_vec();
 
-        Ok((
-            MdatBox { data: payload },
-            size
-        ))
+        Ok((MdatBox { data: payload }, size))
     }
 }

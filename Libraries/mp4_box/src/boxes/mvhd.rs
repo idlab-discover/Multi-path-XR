@@ -21,14 +21,15 @@ use super::generic::Mp4Box;
 // - `next_track_id`: The ID of the next available track, represented as a 32-bit unsigned integer.
 //   This value is used to assign unique IDs to new tracks.
 #[derive(Clone)]
-pub struct MvhdBox { // Movie Header Box
+pub struct MvhdBox {
+    // Movie Header Box
     pub version: u8,
     pub creation_time: u64,
     pub modification_time: u64,
     pub timescale: u32,
     pub duration: u64,
-    pub rate: u32,      // 16.16 fixed-point (default 0x00010000 for 1.0)
-    pub volume: u16,    // 8.8 fixed-point (default 0x0100 for 1.0)
+    pub rate: u32,   // 16.16 fixed-point (default 0x00010000 for 1.0)
+    pub volume: u16, // 8.8 fixed-point (default 0x0100 for 1.0)
     pub next_track_id: u32,
 }
 
@@ -36,13 +37,13 @@ impl Default for MvhdBox {
     fn default() -> Self {
         MvhdBox {
             version: 0,
-            creation_time: 0, // Default creation time is 0.
+            creation_time: 0,     // Default creation time is 0.
             modification_time: 0, // Default modification time is 0.
-            timescale: 30_000, // Default timescale is 30,000 time units per second.
-            duration: 0, // Default duration is 0.
-            rate: 0x00010000, // Default playback rate is 1.0 (normal speed).
-            volume: 0x0100, // Default playback volume is 1.0 (full volume).
-            next_track_id: 2, // Default next track ID is 2.
+            timescale: 30_000,    // Default timescale is 30,000 time units per second.
+            duration: 0,          // Default duration is 0.
+            rate: 0x00010000,     // Default playback rate is 1.0 (normal speed).
+            volume: 0x0100,       // Default playback volume is 1.0 (full volume).
+            next_track_id: 2,     // Default next track ID is 2.
         }
     }
 }
@@ -66,12 +67,14 @@ impl std::fmt::Debug for MvhdBox {
 
 impl Mp4Box for MvhdBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mvhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mvhd"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
         let time_fields_size = if self.version == 1 { 28 } else { 16 };
-        8 + 4 + time_fields_size + 80  // header + version/flags + time fields + rest
+        8 + 4 + time_fields_size + 80 // header + version/flags + time fields + rest
     }
 
     #[inline]
@@ -79,7 +82,7 @@ impl Mp4Box for MvhdBox {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
         buffer.push(self.version);
-        buffer.extend_from_slice(&[0; 3]);  // flags = 0
+        buffer.extend_from_slice(&[0; 3]); // flags = 0
 
         if self.version == 1 {
             buffer.extend_from_slice(&self.creation_time.to_be_bytes());
@@ -95,22 +98,16 @@ impl Mp4Box for MvhdBox {
 
         buffer.extend_from_slice(&self.rate.to_be_bytes());
         buffer.extend_from_slice(&self.volume.to_be_bytes());
-        buffer.extend_from_slice(&[0; 10]);  // reserved
+        buffer.extend_from_slice(&[0; 10]); // reserved
 
         // Unity matrix
         buffer.extend_from_slice(&[
-            0x00, 0x01, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x01, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x00, 0x00,
-            0x00, 0x00, 0x40, 0x00
+            0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00,
         ]);
 
-        buffer.extend_from_slice(&[0; 24]);  // pre_defined
+        buffer.extend_from_slice(&[0; 24]); // pre_defined
         buffer.extend_from_slice(&self.next_track_id.to_be_bytes());
     }
 
@@ -127,39 +124,40 @@ impl Mp4Box for MvhdBox {
         let mut offset = 12;
 
         let (creation_time, modification_time, timescale, duration) = if version == 1 {
-            let creation = u64::from_be_bytes(data[offset..offset+8].try_into().unwrap());
+            let creation = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
             offset += 8;
-            let modification = u64::from_be_bytes(data[offset..offset+8].try_into().unwrap());
+            let modification = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
             offset += 8;
-            let timescale = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let timescale = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
-            let duration = u64::from_be_bytes(data[offset..offset+8].try_into().unwrap());
+            let duration = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
             offset += 8;
             (creation, modification, timescale, duration)
         } else if version == 0 {
-            let creation = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as u64;
+            let creation = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as u64;
             offset += 4;
-            let modification = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as u64;
+            let modification =
+                u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as u64;
             offset += 4;
-            let timescale = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let timescale = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
-            let duration = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as u64;
+            let duration = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as u64;
             offset += 4;
             (creation, modification, timescale, duration)
         } else {
             return Err("Unsupported MVHD version".into());
         };
 
-        let rate = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+        let rate = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
         offset += 4;
 
-        let volume = u16::from_be_bytes(data[offset..offset+2].try_into().unwrap());
+        let volume = u16::from_be_bytes(data[offset..offset + 2].try_into().unwrap());
         offset += 2;
 
         // Skip reserved (10 bytes) + matrix (36 bytes) + pre_defined (24 bytes)
         offset += 10 + 36 + 24;
 
-        let next_track_id = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+        let next_track_id = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
 
         Ok((
             MvhdBox {
@@ -172,7 +170,7 @@ impl Mp4Box for MvhdBox {
                 volume,
                 next_track_id,
             },
-            size
+            size,
         ))
     }
 }

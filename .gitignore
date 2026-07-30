@@ -2,6 +2,8 @@
 **/*.metrics
 **/.env
 **/.venv/
+**/.docker-cache/
+**/*.lock
 
 **/*.pyc
 **/*.pyo
@@ -26,8 +28,15 @@
 **/build.ninja
 
 **/*.fdt
+**/test/
 **/test.*
 test.*
+**/temp/
+dist/**/*
+
+Notebooks/**/*
+tmp/**/*
+Controller/metrics/postprocess/output/**/*
 
 target/**/*
 
@@ -35,8 +44,23 @@ Datasets/**/**/
 
 Libraries/Draco/output/build/**/*
 
+Controller/.virtual-wall/*
 Controller/metrics/grafana_data/**/*
 Controller/metrics/prometheus_data/targets.json
 Libraries/Draco/output/*detect_compiler_family.c
 Controller/metrics/measurements/**/*
+Controller/metrics/measurements_old/**/*
+Controller/metrics/measurements_quarantine/**/*
 Server/dist/exports/**/*
+Client/mono_*.blob
+Proxy/CDN/cache/**/*
+Proxy/Relay/logs/**/*
+Proxy/Relay/Relay/logs/**/*
+*.txt
+*.csv
+Environments/VirtualWall/configs/*
+Environments/virtual-wall-lite/virtual_wall.toml
+
+*.private.*
+**/*.private.*
+journal.tex

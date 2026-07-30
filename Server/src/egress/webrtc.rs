@@ -2,19 +2,19 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::encoders::EncodingFormat;
-use crate::processing::aggregator::PointCloudAggregator;
+use crate::processing::aggregator::SpatialFrameAggregator;
 use crate::processing::ProcessingPipeline;
 use crate::services::stream_manager::StreamManager;
 use crate::types::{WebRtcIceCandidate, WebRtcOffer};
 
 use shared_utils::codec::video_codec_capability;
 use shared_utils::peer_connection::create_webrtc_peer_connection;
-use shared_utils::types::{FrameTaskData, PointCloudData};
+use shared_utils::types::{FramePayloadMetadata, FrameTaskData, SpatialFrameData};
+use spatial_codecs::encoder::EncodingFormat;
 
 use circular_buffer::CircularBuffer;
 use serde_json::Value;
@@ -29,25 +29,30 @@ use webrtc::peer_connection::RTCPeerConnection;
 use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
 use webrtc::track::track_local::TrackLocal;
 
-use shared_utils::track_local_pointcloud_rtp::TrackLocalPointCloudRTP;
+use shared_utils::track_local_spatial_rtp::TrackLocalSpatialRtp;
 
-use super::egress_common::{push_preencoded_frame_data, EgressCommonMetrics, EgressProtocol};
+use super::egress_common::{
+    frame_task_to_pcf_wire, push_preencoded_frame_data, AtomicEncodingFormat, EgressCommonMetrics,
+    EgressProtocol,
+};
 
 static WEBRTC_RUNTIME: OnceLock<Arc<Runtime>> = OnceLock::new();
+
+type RtpSenderMap = HashMap<String, Arc<RTCRtpSender>>;
 
 /// WebRTC Egress module responsible for sending frames over WebRTC data channels.
 #[derive(Clone)]
 pub struct WebRTCEgress {
     stream_manager: Arc<StreamManager>,
-    tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalPointCloudRTP>>>>,
-    rtp_senders: Arc<RwLock<HashMap<String, HashMap<String, Arc<RTCRtpSender>>>>>,
+    tracks: Arc<RwLock<HashMap<String, Arc<TrackLocalSpatialRtp>>>>,
+    rtp_senders: Arc<RwLock<HashMap<String, RtpSenderMap>>>,
     processing_pipeline: Arc<ProcessingPipeline>,
     frame_buffer: Arc<Mutex<CircularBuffer<10, FrameTaskData>>>,
-    aggregator: Arc<PointCloudAggregator>,
+    aggregator: Arc<SpatialFrameAggregator>,
     threads_started: Arc<AtomicBool>,
-    fps: Arc<Mutex<u32>>,
-    encoding_format: Arc<Mutex<EncodingFormat>>,
-    max_number_of_points: Arc<Mutex<u64>>,
+    fps: Arc<AtomicU32>,
+    encoding_format: Arc<AtomicEncodingFormat>,
+    max_number_of_primitives: Arc<AtomicU64>,
     /// The map of all connected PeerConnections: socket_id -> RTCPeerConnection
     peer_connections: Arc<RwLock<HashMap<String, Arc<RTCPeerConnection>>>>,
     /// Temporary storage of ICE candidates if the `remote_description` is not yet set
@@ -64,7 +69,7 @@ impl fmt::Debug for WebRTCEgress {
             .field("aggregator", &self.aggregator)
             .field("fps", &self.fps)
             .field("encoding_format", &self.encoding_format)
-            .field("max_number_of_points", &self.max_number_of_points)
+            .field("max_number_of_primitives", &self.max_number_of_primitives)
             .field("egress_metrics", &self.egress_metrics)
             .finish()
     }
@@ -77,7 +82,7 @@ impl WebRTCEgress {
         stream_manager: Arc<StreamManager>,
         processing_pipeline: Arc<ProcessingPipeline>,
     ) {
-        let aggregator = Arc::new(PointCloudAggregator::new(stream_manager.clone()));
+        let aggregator = Arc::new(SpatialFrameAggregator::new(stream_manager.clone()));
 
         let instance = Arc::new(Self {
             stream_manager: stream_manager.clone(),
@@ -87,9 +92,9 @@ impl WebRTCEgress {
             frame_buffer: Arc::new(Mutex::new(CircularBuffer::new())),
             aggregator: aggregator.clone(),
             threads_started: Arc::new(AtomicBool::new(false)),
-            fps: Arc::new(Mutex::new(30)),
-            encoding_format: Arc::new(Mutex::new(EncodingFormat::Draco)),
-            max_number_of_points: Arc::new(Mutex::new(100000)),
+            fps: Arc::new(AtomicU32::new(30)),
+            encoding_format: Arc::new(AtomicEncodingFormat::new(EncodingFormat::Draco)),
+            max_number_of_primitives: Arc::new(AtomicU64::new(100000)),
             peer_connections: Arc::new(RwLock::new(HashMap::new())),
             pending_ice: Arc::new(RwLock::new(HashMap::new())),
             egress_metrics: Arc::new(EgressCommonMetrics::new()),
@@ -101,28 +106,40 @@ impl WebRTCEgress {
 
     #[instrument(skip_all)]
     pub fn get_runtime(&self) -> Arc<Runtime> {
-        WEBRTC_RUNTIME.get_or_init(|| {
-            let rt = runtime::Builder::new_multi_thread()
-                //.worker_threads(2)
-                .thread_name_fn(|| {
-                    static ATOMIC_WEBRTC_ID: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-                    let id = ATOMIC_WEBRTC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    format!("WRTC_R w-{id}")
-                })
-                .enable_all()
-                .build().unwrap();
-            Arc::new(rt)
-        }).clone()
+        WEBRTC_RUNTIME
+            .get_or_init(|| {
+                let rt = runtime::Builder::new_multi_thread()
+                    //.worker_threads(2)
+                    .thread_name_fn(|| {
+                        static ATOMIC_WEBRTC_ID: std::sync::atomic::AtomicUsize =
+                            std::sync::atomic::AtomicUsize::new(0);
+                        let id = ATOMIC_WEBRTC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        format!("WRTC_R w-{id}")
+                    })
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                Arc::new(rt)
+            })
+            .clone()
     }
-    
-    pub fn add_rtp_sender(&self, track_id: String, client_id: String, rtp_sender: Arc<RTCRtpSender>) {
-        info!("New WebRTC track created for client: {} with id: {}", client_id.clone(), track_id.clone());
+
+    pub fn add_rtp_sender(
+        &self,
+        track_id: String,
+        client_id: String,
+        rtp_sender: Arc<RTCRtpSender>,
+    ) {
+        info!(
+            "New WebRTC track created for client: {} with id: {}",
+            client_id.clone(),
+            track_id.clone()
+        );
         // Check if the channel already exists
         let mut rtp_senders = self.rtp_senders.write().unwrap();
         let track_senders = rtp_senders.get_mut(&track_id.clone());
         if let Some(track_senders) = track_senders {
             track_senders.insert(client_id, rtp_sender.clone());
-
         } else {
             // Push a new hash map for the client
             // First we create the hash map and push the track to it
@@ -131,7 +148,6 @@ impl WebRTCEgress {
             rtp_senders.insert(track_id.clone(), new_senders);
         }
     }
-
 
     #[allow(dead_code)]
     pub fn remove_rtp_sender_for_track(&self, track_id: &str, client_id: &str) {
@@ -156,12 +172,19 @@ impl WebRTCEgress {
             if let Some(rtp_sender) = rtp_sender {
                 // Close the sender
                 // Get the peer connection
-                if let Some(peer_connection) = self.peer_connections.read().unwrap().get(client_id).cloned() {
+                if let Some(peer_connection) = self
+                    .peer_connections
+                    .read()
+                    .unwrap()
+                    .get(client_id)
+                    .cloned()
+                {
                     // Close the peer connection
                     let peer_connection_clone = peer_connection.clone();
                     let rtp_sender_clone = rtp_sender.clone();
                     runtime.spawn(async move {
-                        if let Err(e) = peer_connection_clone.remove_track(&rtp_sender_clone).await {
+                        if let Err(e) = peer_connection_clone.remove_track(&rtp_sender_clone).await
+                        {
                             // Ignore the error, optionally log if needed
                             debug!("Error removing track: {:?}", e);
                         }
@@ -188,7 +211,7 @@ impl WebRTCEgress {
     }
 
     // Get all the tracks accross the different clients with the given track id
-    pub fn get_or_create_track(&self, track_id: &str) -> Arc<TrackLocalPointCloudRTP> {
+    pub fn get_or_create_track(&self, track_id: &str) -> Arc<TrackLocalSpatialRtp> {
         {
             let tracks = self.tracks.read().unwrap();
             if let Some(track) = tracks.get(track_id) {
@@ -197,19 +220,14 @@ impl WebRTCEgress {
         }
 
         // If not found, create and insert it
-        let fps = {
-            let fps = *self.fps.lock().unwrap();
-            fps
-        };
+        let fps = self.fps.load(Ordering::Relaxed);
 
-        let new_track = Arc::new(
-            TrackLocalPointCloudRTP::new(
-                video_codec_capability(),
-                track_id.to_owned(),
-                "0".to_owned(),
-                fps,
-            )
-        );
+        let new_track = Arc::new(TrackLocalSpatialRtp::new(
+            video_codec_capability(),
+            track_id.to_owned(),
+            "0".to_owned(),
+            fps,
+        ));
 
         let mut tracks = self.tracks.write().unwrap();
         tracks.insert(track_id.to_string(), new_track.clone());
@@ -217,11 +235,17 @@ impl WebRTCEgress {
         new_track
     }
 
-    /// Removes all tracks for a client and close the 
+    /// Removes all tracks for a client and close the
     pub fn close_peer_connection(&self, client_id: &str) {
         {
             // Get the peer connection
-            if let Some(peer_connection) = self.peer_connections.read().unwrap().get(client_id).cloned() {
+            if let Some(peer_connection) = self
+                .peer_connections
+                .read()
+                .unwrap()
+                .get(client_id)
+                .cloned()
+            {
                 // Get the runtime
                 let runtime = self.get_runtime();
                 // Close the peer connection
@@ -249,11 +273,10 @@ impl WebRTCEgress {
         offer: WebRtcOffer,
         socket: SocketRef,
     ) -> Result<(), Box<dyn std::error::Error>> {
-
         // 1) Create PeerConnection
         let pc = create_webrtc_peer_connection().await?;
 
-        // 2) **Forward server-side ICE to client**:  
+        // 2) **Forward server-side ICE to client**:
         //    Whenever the server finds a new ICE candidate,
         //    it sends it to the client as `webrtc_ice_candidate`.
         let s_clone = socket.clone();
@@ -268,14 +291,13 @@ impl WebRTCEgress {
                             "sdpMLineIndex": json_candidate.sdp_mline_index,
                         });
                         // Send to the client
-                        let _ = s_clone
-                        .emit("webrtc_ice_candidate", &json_val);
+                        let _ = s_clone.emit("webrtc_ice_candidate", &json_val);
                     }
                 }
             })
         }));
 
-        pc.on_track(Box::new(move | _track, _receiver, _transceiver| {
+        pc.on_track(Box::new(move |_track, _receiver, _transceiver| {
             Box::pin(async move {
                 info!("Created new remote track");
                 // TODO: we should store this track somewhere
@@ -287,8 +309,9 @@ impl WebRTCEgress {
         let broadcast_track = self.get_or_create_track(&track_id.clone());
 
         // Add the track to the PeerConnection
-        let rtp_sender = pc.add_track(broadcast_track.clone() as Arc<dyn TrackLocal + Send + Sync>).await?;
-
+        let rtp_sender = pc
+            .add_track(broadcast_track.clone() as Arc<dyn TrackLocal + Send + Sync>)
+            .await?;
 
         // Read incomming RTCP packets
         // Before these packets are returned, they are processed by interceptors.
@@ -306,21 +329,29 @@ impl WebRTCEgress {
         let socket_id_clone = socket_id.clone();
         let track_id_clone = track_id.clone();
         let self_clone = self.clone();
-        pc.on_peer_connection_state_change(Box::new(
-            move |s: RTCPeerConnectionState| {
-                info!("Peer Connection State has changed: {s}");
-                if s == RTCPeerConnectionState::Connected {
-                    // 9) Store the broadcast track to the tracks
-                    self_clone.add_rtp_sender(track_id_clone.clone(), socket_id_clone.clone(), rtp_sender.clone());
-                } else if s == RTCPeerConnectionState::Disconnected || s == RTCPeerConnectionState::Failed {
-                    // 10) Remove the PeerConnection and the track
-                    self_clone.close_peer_connection(&socket_id_clone);
-                }
-                Box::pin(async move {})
-            },
-        ));
+        pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
+            info!("Peer Connection State has changed: {s}");
+            if s == RTCPeerConnectionState::Connected {
+                // 9) Store the broadcast track to the tracks
+                self_clone.add_rtp_sender(
+                    track_id_clone.clone(),
+                    socket_id_clone.clone(),
+                    rtp_sender.clone(),
+                );
+            } else if s == RTCPeerConnectionState::Disconnected
+                || s == RTCPeerConnectionState::Failed
+            {
+                // 10) Remove the PeerConnection and the track
+                self_clone.close_peer_connection(&socket_id_clone);
+            }
+            Box::pin(async move {})
+        }));
 
-        debug!("Created new PeerConnection for client: {} with sdp: {}", socket_id.clone(), offer.sdp);
+        debug!(
+            "Created new PeerConnection for client: {} with sdp: {}",
+            socket_id.clone(),
+            offer.sdp
+        );
 
         // 4) Set remote description from the client’s SDP
         let offer_sdp = serde_json::from_str::<RTCSessionDescription>(&offer.sdp);
@@ -339,14 +370,12 @@ impl WebRTCEgress {
                 "clientId": socket_id.to_string()
             });
             match socket.emit_with_ack::<Value, Value>("webrtc_answer", &answer_obj) {
-                Ok(ack_stream) => {
-                    match ack_stream.await {
-                        Ok(_) => {
-                            debug!("Sent WebRTC answer to client: {}", socket_id.clone());
-                        },
-                        Err(err) => {
-                            error!("Ack error from socket {}: {:?}", socket_id, err);
-                        },
+                Ok(ack_stream) => match ack_stream.await {
+                    Ok(_) => {
+                        debug!("Sent WebRTC answer to client: {}", socket_id.clone());
+                    }
+                    Err(err) => {
+                        error!("Ack error from socket {}: {:?}", socket_id, err);
                     }
                 },
                 Err(err) => {
@@ -370,7 +399,10 @@ impl WebRTCEgress {
                     if let Err(e) = pc.add_ice_candidate(cand).await {
                         error!("Failed to add previously cached ICE candidate: {}", e);
                     } else {
-                        debug!("Added a previously cached ICE candidate for {}", socket_id.clone());
+                        debug!(
+                            "Added a previously cached ICE candidate for {}",
+                            socket_id.clone()
+                        );
                     }
                 }
             }
@@ -391,9 +423,13 @@ impl WebRTCEgress {
     pub async fn handle_client_ice_candidate(
         &self,
         socket_id: String,
-        candidate: WebRtcIceCandidate
+        candidate: WebRtcIceCandidate,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        debug!("Received ICE candidate from client (WS: {}): {:?}", socket_id.clone(), candidate);
+        debug!(
+            "Received ICE candidate from client (WS: {}): {:?}",
+            socket_id.clone(),
+            candidate
+        );
         let c = RTCIceCandidateInit {
             candidate: candidate.candidate,
             sdp_mid: candidate.sdp_mid,
@@ -412,7 +448,10 @@ impl WebRTCEgress {
                 let mut map = self.pending_ice.write().unwrap();
                 let pending_list = map.entry(socket_id.clone()).or_default();
                 pending_list.push(c);
-                debug!("No remote description set for {}, caching ICE candidate in the meantime.", socket_id);
+                debug!(
+                    "No remote description set for {}, caching ICE candidate in the meantime.",
+                    socket_id
+                );
             } else if let Err(e) = pc.add_ice_candidate(c).await {
                 error!("Failed to add ICE candidate: {}", e);
                 return Err(Box::new(e));
@@ -421,23 +460,25 @@ impl WebRTCEgress {
             let mut map = self.pending_ice.write().unwrap();
             let pending_list = map.entry(socket_id.clone()).or_default();
             pending_list.push(c);
-            debug!("No peer connection found for {}, caching ICE candidate in the meantime.", socket_id);
+            debug!(
+                "No peer connection found for {}, caching ICE candidate in the meantime.",
+                socket_id
+            );
         }
 
         Ok(())
     }
 }
 
-
 impl EgressProtocol for WebRTCEgress {
     #[inline]
     fn encoding_format(&self) -> EncodingFormat {
-        *self.encoding_format.lock().unwrap()
+        self.encoding_format.load()
     }
 
     #[inline]
-    fn max_number_of_points(&self) -> u64 {
-        *self.max_number_of_points.lock().unwrap()
+    fn max_number_of_primitives(&self) -> u64 {
+        self.max_number_of_primitives.load(Ordering::Relaxed)
     }
 
     fn ensure_threads_started(&self) {
@@ -457,7 +498,7 @@ impl EgressProtocol for WebRTCEgress {
             self.frame_buffer.clone(),
             self.fps.clone(),
             self.encoding_format.clone(),
-            self.max_number_of_points.clone(),
+            self.max_number_of_primitives.clone(),
         );
 
         let self_clone = self.clone();
@@ -471,20 +512,29 @@ impl EgressProtocol for WebRTCEgress {
         );
     }
 
-    fn push_point_cloud(&self, point_cloud: PointCloudData, stream_id: String) {
+    fn push_spatial_frame(&self, spatial_frame: SpatialFrameData, stream_id: String) {
         self.ensure_threads_started();
-        self.aggregator.update_point_cloud(stream_id, point_cloud);
+        self.aggregator
+            .update_spatial_frame(stream_id, spatial_frame);
     }
 
-
     // Process and sends a frame, this raw version bypasses the aggregation
-    fn push_encoded_frame(&self, raw_data: Vec<u8>, _stream_id: String, mut creation_time: u64, presentation_time: u64, ring_buffer_bypass: bool, client_id: Option<u64>, tile_index: Option<u32>) {
+    fn push_encoded_frame(
+        &self,
+        raw_data: Vec<u8>,
+        _stream_id: String,
+        mut creation_time: u64,
+        presentation_time: u64,
+        ring_buffer_bypass: bool,
+        payload_metadata: Option<FramePayloadMetadata>,
+        client_id: Option<u64>,
+        quality_index: Option<u32>,
+    ) {
         // Ensure the threads are started
         self.ensure_threads_started();
 
         let self_clone = self.clone();
         let bypass = if ring_buffer_bypass {
-
             let since_the_epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards");
@@ -492,11 +542,12 @@ impl EgressProtocol for WebRTCEgress {
 
             Some(Box::new(move |frame| {
                 self_clone.emit_frame_data(frame);
-            }) as Box<dyn Fn(FrameTaskData) + Send + 'static>)
+            })
+                as Box<dyn Fn(FrameTaskData) + Send + 'static>)
         } else {
             None
         };
-        
+
         // Then call the “push_preencoded_frame_data”:
         push_preencoded_frame_data(
             "WRTC_E",
@@ -504,26 +555,32 @@ impl EgressProtocol for WebRTCEgress {
             creation_time,
             presentation_time,
             raw_data, // data is moved
+            payload_metadata,
             bypass,
-            self.egress_metrics.bytes_to_send.clone(),
-            self.egress_metrics.frame_drops_full_egress_buffer.clone(),
-            self.egress_metrics.number_of_combined_frames.clone(),
+            self.egress_metrics.as_ref(),
             client_id,
-            tile_index,
+            quality_index,
         );
     }
 
     /// Emits frame data to all connected WebRTC data channels.
     fn emit_frame_data(&self, frame: FrameTaskData) {
-        debug!("Emitting frame with presentation time: {}", frame.presentation_time);
+        debug!(
+            "Emitting frame with presentation time: {}",
+            frame.presentation_time
+        );
 
-        let track_id = format!("client_{}_{}", frame.sfu_client_id.unwrap_or(0), frame.sfu_tile_index.unwrap_or(0));
+        let track_id = format!(
+            "client_{}_{}",
+            frame.client_id.unwrap_or(0),
+            frame.quality_index.unwrap_or(0)
+        );
 
         let track = {
             let tracks = self.tracks.read().unwrap();
             tracks.get(&track_id).cloned()
         };
-        
+
         if track.is_none() {
             debug!("No track found with id: {}", track_id);
             return;
@@ -535,10 +592,17 @@ impl EgressProtocol for WebRTCEgress {
 
         // Send the frame to all data channels
         let runtime = self.get_runtime();
-        let frame_clone = frame.clone();
+        let frame_nr = frame.send_time;
+        let payload = match frame_task_to_pcf_wire(&frame) {
+            Ok(payload) => payload,
+            Err(err) => {
+                error!("Failed to encode WebRTC frame as PCF: {}", err);
+                return;
+            }
+        };
         let track_clone = track.clone();
         runtime.block_on(async move {
-            let result = track_clone.write_frame(&frame_clone).await;
+            let result = track_clone.write_payload(&payload, frame_nr).await;
             if let Err(e) = result {
                 error!("Failed to write frame to track: {}", e);
             }
@@ -547,15 +611,15 @@ impl EgressProtocol for WebRTCEgress {
     }
 
     fn set_fps(&self, fps: u32) {
-        *self.fps.lock().unwrap() = fps;
+        self.fps.store(fps.max(1), Ordering::Relaxed);
     }
 
     fn set_encoding_format(&self, encoding_format: EncodingFormat) {
-        *self.encoding_format.lock().unwrap() = encoding_format;
+        self.encoding_format.store(encoding_format);
     }
 
-    fn set_max_number_of_points(&self, max_number_of_points: u64) {
-        *self.max_number_of_points.lock().unwrap() = max_number_of_points;
+    fn set_max_number_of_primitives(&self, max_number_of_primitives: u64) {
+        self.max_number_of_primitives
+            .store(max_number_of_primitives, Ordering::Relaxed);
     }
-
 }

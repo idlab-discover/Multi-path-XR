@@ -13,7 +13,8 @@ use super::{generic::Mp4Box, hdlr::HdlrBox, mdhd::MdhdBox, minf::MinfBox};
 // - `hdlr`: An instance of `HdlrBox` representing the handler reference.
 // - `minf`: An instance of `MinfBox` representing the media information.
 #[derive(Default, Clone)]
-pub struct MdiaBox { // Media Box
+pub struct MdiaBox {
+    // Media Box
     pub mdhd: MdhdBox, // Media Header Box
     pub hdlr: HdlrBox, // Handler Reference Box
     pub minf: MinfBox, // Media Information Box
@@ -31,12 +32,13 @@ impl std::fmt::Debug for MdiaBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `MdiaBox` struct.
 impl Mp4Box for MdiaBox {
     // Returns the box type as a 4-byte array. For `MdiaBox`, the type is "mdia".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mdia" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mdia"
+    }
 
     // Calculates the size of the `MdiaBox` in bytes.
     // The size includes:
@@ -63,21 +65,33 @@ impl Mp4Box for MdiaBox {
         let mdhd_size = self.mdhd.box_size() as usize;
         self.mdhd.write_box(buffer);
         if buffer.len() != current_size + mdhd_size {
-            panic!("Error writing MdhdBox: expected size {}, got {}", mdhd_size, buffer.len() - current_size);
+            panic!(
+                "Error writing MdhdBox: expected size {}, got {}",
+                mdhd_size,
+                buffer.len() - current_size
+            );
         }
         // Write the contents of the `HdlrBox`.
         let current_size = buffer.len();
         let hdlr_size = self.hdlr.box_size() as usize;
         self.hdlr.write_box(buffer);
         if buffer.len() != current_size + hdlr_size {
-            panic!("Error writing HdlrBox: expected size {}, got {}", hdlr_size, buffer.len() - current_size);
+            panic!(
+                "Error writing HdlrBox: expected size {}, got {}",
+                hdlr_size,
+                buffer.len() - current_size
+            );
         }
         // Write the contents of the `MinfBox`.
         let current_size = buffer.len();
         let minf_size = self.minf.box_size() as usize;
         self.minf.write_box(buffer);
         if buffer.len() != current_size + minf_size {
-            panic!("Error writing MinfBox: expected size {}, got {}", minf_size, buffer.len() - current_size);
+            panic!(
+                "Error writing MinfBox: expected size {}, got {}",
+                minf_size,
+                buffer.len() - current_size
+            );
         }
     }
 
@@ -101,9 +115,6 @@ impl Mp4Box for MdiaBox {
         let (minf, _minf_size) = MinfBox::read_box(&data[offset..])?;
         //offset += minf_size;
 
-        Ok((
-            MdiaBox { mdhd, hdlr, minf },
-            size
-        ))
+        Ok((MdiaBox { mdhd, hdlr, minf }, size))
     }
 }

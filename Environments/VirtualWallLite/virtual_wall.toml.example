@@ -1,0 +1,35 @@
+# Minimal config for an existing experiment.
+
+# Required: path to the manifest RSpec (XML).
+rspec_path = "./multipathxr.rspec"
+
+# Optional: state file produced by the full manager (gives friendly names + per-node proxy).
+state_json = "./state.json"
+
+# Optional defaults (used if rspec/state does not provide them).
+ssh_username = "username"
+
+# Node hop (optional):
+# If omitted, OpenSSH will use ssh-agent / default keys.
+#ssh_private_key = "~/.ssh/id_ed25519"
+
+# Proxy/bastion hop (optional but common):
+ssh_proxy_private_key = "/path/to/proxy_key.pem"
+
+ssh_forward_agent = true
+ssh_forward_x11 = false
+ssh_server_alive_interval_seconds = 120
+
+# Store known_hosts here (recommended for ephemeral nodes)
+state_dir = "./.virtual-wall"
+
+# Prefer connecting through a jump proxy (bastion).
+use_jump_proxy = true
+jump_proxy = { host = "bastion2.slices-be.eu", port = 22, username = "proxy" }
+
+# Host key policy.
+host_key_checking = "accept-new"  # strict | accept-new | off
+
+connect_timeout_seconds = 15
+command_timeout_seconds = 300
+ping_timeout_seconds = 3

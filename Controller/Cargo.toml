@@ -10,7 +10,7 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 axum.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "process"] }
 tower-http = { workspace = true, features = ["cors", "fs", "trace"] }
-async-trait = "0.1"
+async-trait = { workspace = true }
 dyn-clone = "1.0"
 tower.workspace = true
 tracing-subscriber.workspace = true
@@ -23,5 +23,11 @@ rayon.workspace = true
 circular-buffer.workspace = true
 chrono.workspace = true
 reqwest = { workspace = true, features = ["blocking", "json"] }
-polars.workspace = true
 dashmap.workspace = true
+virtual-wall.workspace = true
+virtual-wall-lite.workspace = true
+big-virtual-wall.workspace = true
+url = "2"
+image = { version = "0.24", default-features = false, features = ["png"] }
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "bitmap_encoder", "ab_glyph", "ttf"] }
+base64 = "0.22"

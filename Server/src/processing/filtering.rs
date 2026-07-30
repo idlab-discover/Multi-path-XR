@@ -1,13 +1,13 @@
 //use tracing::instrument;
 
 // processing/filtering.rs
-use crate::types::FOV;
+use crate::types::Fov;
 
-use shared_utils::types::Point3D;
+use spatial_utils::point::Point3D;
 
 #[allow(dead_code)]
 //#[instrument(skip_all)]
-pub fn filter_by_fov(points: &[Point3D], _fov: &FOV) -> Vec<Point3D> {
+pub fn filter_by_fov(points: &[Point3D], _fov: &Fov) -> Vec<Point3D> {
     // Implement the filtering logic based on FOV
     points
         .iter()

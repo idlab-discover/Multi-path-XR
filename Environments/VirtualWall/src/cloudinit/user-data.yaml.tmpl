@@ -1,0 +1,54 @@
+#cloud-config
+package_update: true
+package_upgrade: false
+packages:
+  - python3
+  - python3-pip
+  - git
+  - htop
+  - tcpdump
+  - net-tools
+  - curl
+  - git
+  - tmux
+  - jq
+  - cmake
+  - ninja-build
+  - mingw-w64
+  - smcroute
+  - libssl-dev
+  - libclang-dev
+write_files:
+  - path: /etc/motd
+    permissions: '0644'
+    owner: root:root
+    content: |
+      Welcome to the XR Virtual Wall node.
+      This machine was provisioned automatically via the SLICES CLI.
+      Check /var/log/cloud-init-output.log for provisioning details.
+  - path: /etc/systemd/system/pc-agent.service
+    permissions: '0644'
+    owner: root:root
+    content: |
+      [Unit]
+      Description=PC Agent
+      After=network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/pc-agent
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+
+runcmd:
+  - [ bash, -lc, "systemctl daemon-reload" ]
+  # Best-effort: don't fail cloud-init if the binary isn't present yet.
+  - [ bash, -lc, "systemctl enable --now pc-agent.service || true" ]
+  - [ bash, -lc, "echo \"Cloud-init VirtualWall complete\"" ]
+  - [ bash, -lc, "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" ]
+runcmd:
+  - [ sh, -c, "echo 'Virtual Wall provisioning completed' | systemd-cat -t virtual-wall" ]

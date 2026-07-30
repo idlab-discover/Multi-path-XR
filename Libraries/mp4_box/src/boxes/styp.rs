@@ -20,12 +20,7 @@ impl Default for StypBox {
         StypBox {
             major_brand: *b"isom",
             minor_version: 0,
-            compatible_brands: vec![
-                *b"isom",
-                *b"iso6",
-                *b"dash",
-                *b"cmfc",
-            ],
+            compatible_brands: vec![*b"isom", *b"iso6", *b"dash", *b"cmfc"],
         }
     }
 }
@@ -39,9 +34,11 @@ impl std::fmt::Debug for StypBox {
             .field("minor_version", &self.minor_version)
             .field(
                 "compatible_brands",
-                &self.compatible_brands.iter()
+                &self
+                    .compatible_brands
+                    .iter()
                     .map(format_fourcc)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
             .finish()
     }
@@ -51,7 +48,9 @@ impl std::fmt::Debug for StypBox {
 impl Mp4Box for StypBox {
     // Returns the box type as a 4-byte array. For `StypBox`, the type is "styp".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"styp" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"styp"
+    }
 
     // Calculates the size of the `StypBox` in bytes.
     // The size includes:
@@ -111,7 +110,7 @@ impl Mp4Box for StypBox {
         let mut compatible_brands = Vec::new();
         let mut offset = 16;
         while offset + 4 <= size {
-            compatible_brands.push(data[offset..offset+4].try_into().unwrap());
+            compatible_brands.push(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
         }
 
@@ -121,7 +120,7 @@ impl Mp4Box for StypBox {
                 minor_version,
                 compatible_brands,
             },
-            size
+            size,
         ))
     }
 }

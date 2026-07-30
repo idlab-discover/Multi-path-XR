@@ -29,9 +29,10 @@ pub trait Mp4Box {
 
     /// Reads a box from the given byte slice.
     /// Returns a tuple of (BoxInstance, bytes_consumed).
-    fn read_box(data: &[u8]) -> Result<(Self, usize), String> where Self: Sized;
+    fn read_box(data: &[u8]) -> Result<(Self, usize), String>
+    where
+        Self: Sized;
 }
-
 
 // The `UnknownBox` struct represents a box in the MP4 file format that we haven't implemented yet.
 // This box contains the raw data that is included inside this box.
@@ -39,15 +40,16 @@ pub trait Mp4Box {
 // Fields:
 // - `data`: A vector of bytes representing the raw data.
 #[derive(Clone)]
-pub struct UnknownBox { // Media Data Box
+pub struct UnknownBox {
+    // Media Data Box
     pub btype: [u8; 4], // The type of the box (4 bytes)
-    pub data: Vec<u8>,   // The raw encoded frame
+    pub data: Vec<u8>,  // The raw encoded frame
 }
 
 impl Default for UnknownBox {
     fn default() -> Self {
         UnknownBox {
-            btype: *b"xxxx",   // By default, the box type is set to "xxxx"
+            btype: *b"xxxx",  // By default, the box type is set to "xxxx"
             data: Vec::new(), // Initialize the data vector as empty
         }
     }
@@ -111,10 +113,9 @@ impl Mp4Box for UnknownBox {
         Ok((
             UnknownBox {
                 btype: box_type.try_into().map_err(|_| "Invalid box type length")?,
-                data: payload
+                data: payload,
             },
-            size
+            size,
         ))
     }
 }
-

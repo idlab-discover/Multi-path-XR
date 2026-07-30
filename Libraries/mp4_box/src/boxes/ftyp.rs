@@ -10,8 +10,8 @@ use super::generic::Mp4Box;
 // - `compatible_brands`: A vector of 4-byte arrays indicating other compatible brands.
 #[derive(Clone)]
 pub struct FtypBox {
-    pub major_brand: [u8; 4], // Major brand of the file.
-    pub minor_version: u32,   // Minor version of the major brand.
+    pub major_brand: [u8; 4],            // Major brand of the file.
+    pub minor_version: u32,              // Minor version of the major brand.
     pub compatible_brands: Vec<[u8; 4]>, // List of compatible brands.
 }
 
@@ -25,11 +25,7 @@ impl Default for FtypBox {
         FtypBox {
             major_brand: *b"isom",
             minor_version: 0,
-            compatible_brands: vec![
-                *b"isom",
-                *b"iso6",
-                *b"dash",
-            ],
+            compatible_brands: vec![*b"isom", *b"iso6", *b"dash"],
         }
     }
 }
@@ -41,10 +37,13 @@ impl std::fmt::Debug for FtypBox {
             .field("box_type", &format_fourcc(&self.box_type()))
             .field("major_brand", &format_fourcc(&self.major_brand))
             .field("minor_version", &self.minor_version)
-            .field("compatible_brands", 
-                &self.compatible_brands.iter()
+            .field(
+                "compatible_brands",
+                &self
+                    .compatible_brands
+                    .iter()
                     .map(format_fourcc)
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>(),
             )
             .finish()
     }
@@ -54,7 +53,9 @@ impl std::fmt::Debug for FtypBox {
 impl Mp4Box for FtypBox {
     // Returns the box type as a 4-byte array. For `FtypBox`, the type is "ftyp".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"ftyp" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"ftyp"
+    }
 
     // Calculates the size of the `FtypBox` in bytes.
     // The size includes:
@@ -114,7 +115,7 @@ impl Mp4Box for FtypBox {
         let mut compatible_brands = Vec::new();
         let mut offset = 16;
         while offset + 4 <= size {
-            compatible_brands.push(data[offset..offset+4].try_into().unwrap());
+            compatible_brands.push(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
         }
 
@@ -124,7 +125,7 @@ impl Mp4Box for FtypBox {
                 minor_version,
                 compatible_brands,
             },
-            size
+            size,
         ))
     }
 }

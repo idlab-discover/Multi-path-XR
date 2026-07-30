@@ -1,10 +1,23 @@
-use pc_receiver::{args::{get_log_level_filter, parse_args}, ingress::Ingress, utils::{create_metrics, start_metrics_server}};
+use pc_receiver::{
+    args::{get_log_level_filter, parse_args},
+    ingress::Ingress,
+    services::stream_manager::{MoqClientConfig, MoqTlsConfig},
+    utils::{create_metrics, start_metrics_server},
+};
+use shared_utils::crypto;
+use std::time::{Duration, Instant};
+use tracing::level_filters::LevelFilter;
 use tracing::{debug, error, info};
-use tracing_subscriber::{layer::SubscriberExt, Layer};
-use std::time::Duration;
+use tracing_subscriber::{filter::Targets, layer::SubscriberExt, Layer};
+use url::Url;
 
 fn main() {
     let args = parse_args();
+
+    let base_log_level = get_log_level_filter(&args);
+    let log_targets = Targets::new()
+        .with_default(base_log_level)
+        .with_target("moq_transport", LevelFilter::OFF);
 
     // Build the FmtSubscriber layer
     let fmt_layer = tracing_subscriber::fmt::layer()
@@ -14,7 +27,7 @@ fn main() {
         .with_file(true)
         .with_line_number(true)
         .with_thread_ids(true)
-        .with_filter(get_log_level_filter(&args));
+        .with_filter(log_targets);
 
     // Initialize console tracing if enabled
     #[cfg(feature = "console-tracing")]
@@ -29,16 +42,16 @@ fn main() {
     };
 
     #[cfg(not(feature = "console-tracing"))]
-    let subscriber = {
-        tracing_subscriber::registry()
-            .with(fmt_layer)
-    };
+    let subscriber = { tracing_subscriber::registry().with(fmt_layer) };
 
-    tracing::subscriber::set_global_default(subscriber).expect("Failed to set global default subscriber");
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to set global default subscriber");
+
+    // Avoid runtime rustls panics by picking our crypto provider immediately.
+    crypto::install_default_crypto_provider();
 
     info!("Starting receiver client (headless)");
     info!("{:?}", args);
-
 
     create_metrics().unwrap();
 
@@ -47,8 +60,28 @@ fn main() {
     // Set the parameters first before initializing
     {
         let stream_manager = ingress.get_stream_manager();
-        stream_manager.set_websocket_url(args.server_url);
+        stream_manager.set_http_url(args.http_url);
+        stream_manager.set_websocket_url(args.websocket_url);
         stream_manager.set_flute_url(args.multicast_url);
+        if let Some(moq_url) = args.moq_url.as_ref() {
+            match Url::parse(moq_url) {
+                Ok(url) => {
+                    let tls_args = MoqTlsConfig {
+                        cert: args.moq_tls_cert.clone(),
+                        key: args.moq_tls_key.clone(),
+                        root: args.moq_tls_root.clone(),
+                        disable_verify: args.moq_tls_disable_verify,
+                    };
+                    stream_manager.set_moq_config(MoqClientConfig {
+                        url,
+                        namespace: args.moq_namespace.clone(),
+                        bind: args.moq_bind,
+                        tls: tls_args,
+                    });
+                }
+                Err(err) => error!("Invalid MoQ URL provided: {err}"),
+            }
+        }
     }
     // Finish initializing the ingress system
     ingress.initialize();
@@ -60,27 +93,47 @@ fn main() {
     // Get the storage
     let storage = ingress.get_storage();
 
-    // For demonstration, loop forever at 30 frames per second
     let fps = 30;
-    let max_wait_time = std::time::Duration::from_secs_f32(1.0 / fps as f32);
+    let frame_period = frame_offset_duration(1, fps);
+    let schedule_start = Instant::now();
+    let mut next_frame_index = 0_u64;
     // A backlog threshold where we decide to skip older frames
     let skip_threshold = 10; // number of frames in the queue
-    // A backlog threshold where we *start* adjusting wait times
-    let catchup_threshold = 3;
     loop {
-        let start = std::time::Instant::now();
+        let now = Instant::now();
+        let mut frame_target = schedule_start + frame_offset_duration(next_frame_index, fps);
+        if now >= frame_target && now.duration_since(frame_target) >= frame_period {
+            let current_grid_index =
+                frame_index_for_elapsed(now.duration_since(schedule_start), fps);
+            if current_grid_index > next_frame_index {
+                debug!(
+                    "Frame consumption loop late by {:?}; snapping from tick {} to {}.",
+                    now.duration_since(frame_target),
+                    next_frame_index,
+                    current_grid_index
+                );
+                next_frame_index = current_grid_index;
+                frame_target = schedule_start + frame_offset_duration(next_frame_index, fps);
+            }
+        }
+
+        let wait_now = Instant::now();
+        if wait_now < frame_target {
+            std::thread::sleep(frame_target - wait_now);
+        }
+        next_frame_index = next_frame_index.saturating_add(1);
+
+        let start = Instant::now();
         // Get all the stream ids in the storage
         let stream_ids = storage.get_stream_ids();
         // For each stream id, consume a frame
         for stream_id in stream_ids {
-            
             let frames_in_buffer = storage.get_frame_count(&stream_id);
             // If backlog is too large, skip older frames
             if frames_in_buffer > skip_threshold {
-                let frames_to_skip = frames_in_buffer.saturating_sub(1); 
+                let frames_to_skip = frames_in_buffer.saturating_sub(1);
                 // e.g., skip all but the very last frame
                 let removed = storage.remove_oldest_frames(&stream_id, frames_to_skip);
-                storage.frames_skipped_total.add(removed as i64);
                 if removed > 0 {
                     info!(
                         "Skipped {} oldest frames for stream_id = {} (too large backlog).",
@@ -93,7 +146,10 @@ fn main() {
             let frame_data = storage.consume_frame(&stream_id);
             if let Some(frame_data) = frame_data {
                 // Process the frame data
-                info!("Consumed frame data for stream id: {} with {} points", stream_id, frame_data.point_count);
+                debug!(
+                    "Consumed frame data for stream id: {} with {} points",
+                    stream_id, frame_data.point_count
+                );
             }
         }
 
@@ -101,36 +157,26 @@ fn main() {
         let highest_frame_count = storage.get_highest_frame_count();
         storage.current_backlog.set(highest_frame_count as i64);
 
-        // If the backlog is beyond a certain threshold, we accelerate consumption
-        // by reducing the sleep time. You could also consume multiple frames
-        // from each stream each loop iteration, or do any other catch-up strategy.
-        let dynamic_frame_duration = if highest_frame_count >= catchup_threshold {
-            // For example, cut the sleep time proportionally to backlog
-            // The higher the backlog, the more we reduce the wait
-            let factor = (highest_frame_count - catchup_threshold + 1) as f32;
-            // This factor can be computed in various ways:
-            //   - linear
-            //   - exponential
-            //   - step-based
-            // Example: half the normal wait time for each backlog count above threshold.
-            // Feel free to tune or clamp this as needed.
-            let adjusted = max_wait_time.div_f32(2_f32.powf(factor.min(5.0)));
-            debug!(
-                "Backlog = {}, reducing wait time from {:?} to {:?}.",
-                highest_frame_count, max_wait_time, adjusted
-            );
-            adjusted
-        } else {
-            // If backlog is not too large, use normal wait time
-            max_wait_time
-        };
-
-        // Wait for the remaining time      
         let elapsed = start.elapsed();
-        if elapsed < dynamic_frame_duration {
-            std::thread::sleep(Duration::from_millis(1));
-        } else {
-            error!("Frame consumption took longer than the target wait time.");
+        if elapsed > frame_period {
+            error!(
+                "Frame consumption took longer than the target frame period by {:?}.",
+                elapsed - frame_period
+            );
         }
     }
+}
+
+fn frame_offset_duration(frame_index: u64, fps: u32) -> Duration {
+    const NANOS_PER_SECOND: u128 = 1_000_000_000;
+    let fps = fps.max(1) as u128;
+    let nanos = NANOS_PER_SECOND.saturating_mul(frame_index as u128) / fps;
+    Duration::from_nanos(nanos.min(u64::MAX as u128) as u64)
+}
+
+fn frame_index_for_elapsed(elapsed: Duration, fps: u32) -> u64 {
+    const NANOS_PER_SECOND: u128 = 1_000_000_000;
+    let fps = fps.max(1) as u128;
+    let index = elapsed.as_nanos().saturating_mul(fps) / NANOS_PER_SECOND;
+    index.min(u64::MAX as u128) as u64
 }

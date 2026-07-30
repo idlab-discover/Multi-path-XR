@@ -1,5 +1,9 @@
-use std::{io, net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket}, time::Duration};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+use std::{
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
+    time::Duration,
+};
 
 fn bind_multicast(sock: &Socket, addr: &SocketAddr) -> io::Result<()> {
     #[cfg(windows)]
@@ -19,12 +23,12 @@ fn bind_multicast(sock: &Socket, addr: &SocketAddr) -> io::Result<()> {
 }
 
 pub struct UdpRxOpts {
-    pub group: SocketAddr,           // multicast group:port
-    pub read_timeout: Duration,      // e.g., 200ms
-    pub recv_buf_bytes: usize,       // e.g., 8*1024*1024
-    pub reuse_port: bool,            // allow multi listeners where supported
-    pub v6_ifindex: Option<u32>,     // Some(idx) if needed (macOS/Windows), else None
-    pub disable_loop: bool,          // disable seeing own packets
+    pub group: SocketAddr,       // multicast group:port
+    pub read_timeout: Duration,  // e.g., 200ms
+    pub recv_buf_bytes: usize,   // e.g., 8*1024*1024
+    pub reuse_port: bool,        // allow multi listeners where supported
+    pub v6_ifindex: Option<u32>, // Some(idx) if needed (macOS/Windows), else None
+    pub disable_loop: bool,      // disable seeing own packets
 }
 impl Default for UdpRxOpts {
     fn default() -> Self {
@@ -40,7 +44,11 @@ impl Default for UdpRxOpts {
 }
 
 pub fn build_multicast_receiver(opts: UdpRxOpts) -> io::Result<UdpSocket> {
-    let domain = if opts.group.is_ipv4() { Domain::IPV4 } else { Domain::IPV6 };
+    let domain = if opts.group.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
     let sock = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
 
     sock.set_reuse_address(true)?;
@@ -84,13 +92,13 @@ pub fn build_multicast_receiver(opts: UdpRxOpts) -> io::Result<UdpSocket> {
 }
 
 pub struct UdpTxOpts {
-    pub dst: SocketAddr,             // multicast dst:port
-    pub ttl_v4: Option<u32>,         // Some(2) etc.
-    pub hops_v6: Option<u32>,        // Some(2) etc.
-    pub v4_if: Option<Ipv4Addr>,     // select NIC for v4
-    pub v6_ifindex: Option<u32>,     // select NIC for v6
-    pub snd_buf_bytes: usize,        // e.g., 8*1024*1024
-    pub disable_loop: bool,          // disable local loopback of sent packets
+    pub dst: SocketAddr,         // multicast dst:port
+    pub ttl_v4: Option<u32>,     // Some(2) etc.
+    pub hops_v6: Option<u32>,    // Some(2) etc.
+    pub v4_if: Option<Ipv4Addr>, // select NIC for v4
+    pub v6_ifindex: Option<u32>, // select NIC for v6
+    pub snd_buf_bytes: usize,    // e.g., 8*1024*1024
+    pub disable_loop: bool,      // disable local loopback of sent packets
 }
 impl Default for UdpTxOpts {
     fn default() -> Self {
@@ -107,7 +115,11 @@ impl Default for UdpTxOpts {
 }
 
 pub fn build_multicast_sender(opts: UdpTxOpts) -> io::Result<UdpSocket> {
-    let domain = if opts.dst.is_ipv4() { Domain::IPV4 } else { Domain::IPV6 };
+    let domain = if opts.dst.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
     let sock = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
 
     let any = if opts.dst.is_ipv4() {

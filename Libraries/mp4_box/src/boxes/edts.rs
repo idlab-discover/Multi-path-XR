@@ -1,6 +1,6 @@
 use crate::format_fourcc;
 
-use super::{generic::Mp4Box, elst::ElstBox};
+use super::{elst::ElstBox, generic::Mp4Box};
 
 // The `EdtsBox` struct represents an Edit Box (`edts`) in the MP4 file format.
 // This box contains information about how to map the media time-line to the presentation time-line.
@@ -10,7 +10,8 @@ use super::{generic::Mp4Box, elst::ElstBox};
 // Fields:
 // - `elst`: An optional `ElstBox` containing edit list entries.
 #[derive(Default, Clone)]
-pub struct EdtsBox { // Edit Box
+pub struct EdtsBox {
+    // Edit Box
     pub elst: Option<ElstBox>, // Optional Edit List Box
 }
 
@@ -27,7 +28,9 @@ impl std::fmt::Debug for EdtsBox {
 // Implementation of the `Mp4Box` trait for the `EdtsBox` struct.
 impl Mp4Box for EdtsBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"edts" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"edts"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -48,7 +51,11 @@ impl Mp4Box for EdtsBox {
             let elst_size = elst.box_size() as usize;
             elst.write_box(buffer);
             if buffer.len() != current_size + elst_size {
-                panic!("Error writing ElstBox: expected size {}, got {}", elst_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing ElstBox: expected size {}, got {}",
+                    elst_size,
+                    buffer.len() - current_size
+                );
             }
         }
     }
@@ -66,8 +73,9 @@ impl Mp4Box for EdtsBox {
         let mut elst = None;
 
         while offset + 8 <= size {
-            let sub_size = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
-            let sub_type = &data[offset+4..offset+8];
+            let sub_size =
+                u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let sub_type = &data[offset + 4..offset + 8];
 
             if offset + sub_size > size || sub_size < 8 {
                 return Err("Invalid sub-box inside EDTS".into());
@@ -78,7 +86,8 @@ impl Mp4Box for EdtsBox {
                     if elst.is_some() {
                         return Err("Duplicate ELST box inside EDTS".into());
                     }
-                    let (parsed, parsed_size) = ElstBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        ElstBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect ELST box size".into());
                     }

@@ -1,4 +1,12 @@
-use super::{co64::Co64Box, ctts::CttsBox, dinf::DinfBox, dref::DrefBox, edts::EdtsBox, elst::ElstBox, ftyp::FtypBox, generic::UnknownBox, hdlr::HdlrBox, mdat::MdatBox, mdhd::MdhdBox, mdia::MdiaBox, mehd::MehdBox, meta::MetaBox, mfhd::MfhdBox, minf::MinfBox, moof::MoofBox, moov::MoovBox, mvex::MvexBox, mvhd::MvhdBox, smhd::SmhdBox, stbl::StblBox, stco::StcoBox, stsc::StscBox, stsd::StsdBox, stss::StssBox, stsz::StszBox, stts::SttsBox, styp::StypBox, tfdt::TfdtBox, tfhd::TfhdBox, tkhd::TkhdBox, traf::TrafBox, trak::TrakBox, trex::TrexBox, trun::TrunBox, udta::UdtaBox, vmhd::VmhdBox};
+use super::{
+    co64::Co64Box, ctts::CttsBox, dinf::DinfBox, dref::DrefBox, edts::EdtsBox, elst::ElstBox,
+    ftyp::FtypBox, generic::UnknownBox, hdlr::HdlrBox, mdat::MdatBox, mdhd::MdhdBox, mdia::MdiaBox,
+    mehd::MehdBox, meta::MetaBox, mfhd::MfhdBox, minf::MinfBox, moof::MoofBox, moov::MoovBox,
+    mvex::MvexBox, mvhd::MvhdBox, smhd::SmhdBox, stbl::StblBox, stco::StcoBox, stsc::StscBox,
+    stsd::StsdBox, stss::StssBox, stsz::StszBox, stts::SttsBox, styp::StypBox, tfdt::TfdtBox,
+    tfhd::TfhdBox, tkhd::TkhdBox, traf::TrafBox, trak::TrakBox, trex::TrexBox, trun::TrunBox,
+    udta::UdtaBox, vmhd::VmhdBox,
+};
 
 #[derive(Debug, Clone)]
 pub enum Mp4BoxEnum {

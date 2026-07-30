@@ -1,18 +1,18 @@
-use crate::format_fourcc;
 use super::{generic::Mp4Box, meta::MetaBox};
+use crate::format_fourcc;
 
 /// The `UdtaBox` represents the User Data Box in the MP4 file format.
 /// It typically contains user-specific data, often including a `MetaBox`.
 #[derive(Default, Clone)]
 pub struct UdtaBox {
-    pub meta: Option<MetaBox>,  // Optional MetaBox inside UdtaBox
+    pub meta: Option<MetaBox>, // Optional MetaBox inside UdtaBox
 }
 
 impl std::fmt::Debug for UdtaBox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_struct("UdtaBox");
         dbg.field("box_size", &self.box_size())
-           .field("box_type", &format_fourcc(&self.box_type()));
+            .field("box_type", &format_fourcc(&self.box_type()));
         if self.meta.is_some() {
             dbg.field("meta", &"Present");
         } else {
@@ -24,7 +24,9 @@ impl std::fmt::Debug for UdtaBox {
 
 impl Mp4Box for UdtaBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"udta" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"udta"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -58,7 +60,7 @@ impl Mp4Box for UdtaBox {
         let mut meta = None;
 
         if offset < size {
-            let box_type = &data[offset+4..offset+8];
+            let box_type = &data[offset + 4..offset + 8];
             if box_type == b"meta" {
                 let (meta_box, _consumed) = MetaBox::read_box(&data[offset..])?;
                 meta = Some(meta_box);

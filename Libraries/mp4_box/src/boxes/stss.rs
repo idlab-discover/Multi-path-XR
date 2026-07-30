@@ -1,23 +1,13 @@
-use crate::format_fourcc;
 use super::generic::Mp4Box;
+use crate::format_fourcc;
 
 /// The `StssBox` (Sync Sample Box) lists the samples that are sync points (keyframes).
 /// If this box is not present, all samples are considered sync samples.
-#[derive(Clone)]
+#[derive(Clone, Default)] // Everything defaults to 0/empty/false
 pub struct StssBox {
-    pub version: u8,         // Full box version
-    pub flags: u32,          // Full box flags (24 bits used)
-    pub entries: Vec<u32>,   // List of sample numbers (1-based index)
-}
-
-impl Default for StssBox {
-    fn default() -> Self {
-        StssBox {
-            version: 0,
-            flags: 0,
-            entries: Vec::new(),
-        }
-    }
+    pub version: u8,       // Full box version
+    pub flags: u32,        // Full box flags (24 bits used)
+    pub entries: Vec<u32>, // List of sample numbers (1-based index)
 }
 
 impl std::fmt::Debug for StssBox {
@@ -34,7 +24,9 @@ impl std::fmt::Debug for StssBox {
 
 impl Mp4Box for StssBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"stss" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"stss"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -49,7 +41,7 @@ impl Mp4Box for StssBox {
 
         // Write version and flags
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // Only 3 bytes for flags
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // Only 3 bytes for flags
 
         // Write number of entries
         buffer.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
@@ -88,14 +80,18 @@ impl Mp4Box for StssBox {
         let mut entries = Vec::with_capacity(entry_count as usize);
         let mut offset = 16;
         for _ in 0..entry_count {
-            let sample_number = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let sample_number = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             entries.push(sample_number);
             offset += 4;
         }
 
         Ok((
-            StssBox { version, flags, entries },
-            size
+            StssBox {
+                version,
+                flags,
+                entries,
+            },
+            size,
         ))
     }
 }

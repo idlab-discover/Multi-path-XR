@@ -1,0 +1,28 @@
+host_pool:
+  count: 10
+  prefix: "vw-node-"
+
+virtual_pool:
+  per_host: 10
+  prefix: "vn"
+  start_index: 1
+
+vlan_pool:
+  start: 100
+  count: 3
+  subnets:
+    100: "192.168.100.0/24"   # experiment VLAN A
+    200: "192.168.200.0/24"   # experiment VLAN B
+    10:  "10.10.10.0/24"      # mgmt (keep separated in usage)
+
+# Bind VLANs to specific host interfaces (example)
+vlan_bindings:
+  100: "eth1"
+  200: "eth2"
+  10:  "eth0"
+
+# Define three shared LANs across all virtual nodes (mgmt + two experiment VLANs).
+# For brevity, links are omitted; the planner will tag cross-host links via VLAN pool.
+links: []
+
+tunnels: []

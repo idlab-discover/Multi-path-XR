@@ -30,15 +30,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 
-# Choose debug or release binary
+# Choose the newest matching debug or release binary. This keeps manual
+# `cargo build --release` and the repo build scripts compatible.
 if [[ "$RELEASE_MODE" == "true" ]]; then
-    EXECUTABLE="../target/x86_64-unknown-linux-gnu/release/pc-controller"
+    candidates=(
+        "../target/x86_64-unknown-linux-gnu/release/pc-controller"
+        "../target/release/pc-controller"
+    )
 else
-    EXECUTABLE="../target/x86_64-unknown-linux-gnu/debug/pc-controller"
+    candidates=(
+        "../target/x86_64-unknown-linux-gnu/debug/pc-controller"
+        "../target/debug/pc-controller"
+    )
 fi
-# Check if the file exists
-if [[ ! -f "$EXECUTABLE" ]]; then
-    echo "Error: Executable $EXECUTABLE not found."
+
+EXECUTABLE=""
+EXECUTABLE_MTIME=-1
+
+for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate" ]]; then
+        mtime=$(stat -c %Y "$candidate")
+        if (( mtime > EXECUTABLE_MTIME )); then
+            EXECUTABLE="$candidate"
+            EXECUTABLE_MTIME=$mtime
+        fi
+    fi
+done
+
+# Check if a matching executable exists
+if [[ -z "$EXECUTABLE" ]]; then
+    echo "Error: Executable not found. Checked: ${candidates[*]}"
     exit 1
 fi
 
@@ -49,9 +70,9 @@ fi
 
 # Execute the target executable and pass all arguments
 if [[ $# -gt 0 ]]; then
-    "$EXECUTABLE" "$@"
+    exec "$EXECUTABLE" "$@"
 else
-    "$EXECUTABLE"
+    exec "$EXECUTABLE"
 fi
 
 echo "The controller has stopped."

@@ -16,7 +16,7 @@ pub fn ifindex_by_name(_name: &str) -> Option<u32> {
 
 #[cfg(unix)]
 pub fn ipv4_of(name: &str) -> Option<Ipv4Addr> {
-    // Minimal impl: use std::process::Command to query or add a proper getifaddrs impl later.
+    // TODO: Minimal impl: use std::process::Command to query or add a proper getifaddrs impl later.
     // Keep it simple for now; return None by default.
     let _ = name;
     None
@@ -24,5 +24,6 @@ pub fn ipv4_of(name: &str) -> Option<Ipv4Addr> {
 
 #[cfg(windows)]
 pub fn ipv4_of(_name: &str) -> Option<Ipv4Addr> {
+    // TODO: implement via GetAdaptersAddresses
     None
 }

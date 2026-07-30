@@ -1,16 +1,17 @@
-use socketioxide::SocketIo;
-use tracing::instrument;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use crate::egress::buffer::BufferEgress;
 use crate::egress::egress_common::EgressProtocol;
 use crate::egress::file::FileEgress;
 use crate::egress::flute::FluteEgress;
+use crate::egress::moq::MoqEgress;
 use crate::egress::webrtc::WebRTCEgress;
 use crate::egress::websocket::WebSocketEgress;
 use crate::ingress::webrtc::WebRTCIngress;
 use crate::ingress::websocket::WebSocketIngress;
-use crate::types::{StreamSettings, EgressProtocolType};
+use crate::types::{EgressProtocolType, StreamPayloadFormat, StreamSettings};
+use socketioxide::SocketIo;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use tracing::instrument;
 
 #[derive(Debug)]
 pub struct StreamManager {
@@ -24,6 +25,7 @@ pub struct StreamManager {
     pub flute_egress: RwLock<Option<Arc<FluteEgress>>>,
     pub file_egress: RwLock<Option<Arc<FileEgress>>>,
     pub buffer_egress: RwLock<Option<Arc<BufferEgress>>>,
+    pub moq_egress: RwLock<Option<Arc<MoqEgress>>>,
     // Ingress protocol singletons
     pub webrtc_ingress: RwLock<Option<Arc<WebRTCIngress>>>,
     pub websocket_ingress: RwLock<Option<Arc<WebSocketIngress>>>,
@@ -39,6 +41,7 @@ impl StreamManager {
             flute_egress: RwLock::new(None),
             file_egress: RwLock::new(None),
             buffer_egress: RwLock::new(None),
+            moq_egress: RwLock::new(None),
             stream_settings: RwLock::new(HashMap::new()),
             webrtc_ingress: RwLock::new(None),
             websocket_ingress: RwLock::new(None),
@@ -68,22 +71,23 @@ impl StreamManager {
                 rotation: [0.0, 0.0, 0.0],
                 scale: [1.0, 1.0, 1.0],
                 presentation_time_offset: None,
+                input_format: StreamPayloadFormat::Auto,
                 decode_bypass: false,
                 aggregator_bypass: false,
                 ring_buffer_bypass: false,
-                sfu_client_id: None,
-                sfu_tile_index: None,
-                max_point_percentages: None,
+                client_id: None,
+                quality_index: None,
+                max_primitive_percentages: None,
             }
         };
 
-        // Try to extract SFU client ID and tile index from stream_id
-        // This is a workaround for the SFU client ID and tile index being part of the stream_id
+        // Try to extract SFU client ID and quality index from stream_id
+        // This is a workaround for the SFU client ID and quality index being part of the stream_id
         if settings.stream_id.starts_with("client_") {
             let parts = settings.stream_id.split('_').collect::<Vec<_>>();
             if parts.len() > 2 {
-                settings.sfu_client_id = parts[1].parse::<u64>().ok();
-                settings.sfu_tile_index = parts[2].parse::<u32>().ok();
+                settings.client_id = parts[1].parse::<u64>().ok();
+                settings.quality_index = parts[2].parse::<u32>().ok();
             }
         }
 
@@ -93,9 +97,11 @@ impl StreamManager {
 
     #[instrument(skip_all)]
     pub fn update_stream_settings(&self, settings: StreamSettings) {
-        self.stream_settings.write().unwrap().insert(settings.stream_id.clone(), settings);
+        self.stream_settings
+            .write()
+            .unwrap()
+            .insert(settings.stream_id.clone(), settings);
     }
-
 
     #[instrument(skip_all)]
     pub fn set_socket_io(&self, socket_io: Arc<SocketIo>) {
@@ -108,29 +114,24 @@ impl StreamManager {
     }
 
     // Methods to set and get egress protocol singletons
-    pub fn get_egress(
-        &self,
-        kind: &EgressProtocolType,
-    ) -> Option<Arc<dyn EgressProtocol>> {
+    pub fn get_egress(&self, kind: &EgressProtocolType) -> Option<Arc<dyn EgressProtocol>> {
         use EgressProtocolType::*;
         match kind {
             WebSocket => self.get_websocket_egress().map(|e| e as _),
-            WebRTC    => self.get_webrtc_egress   ().map(|e| e as _),
-            Flute     => self.get_flute_egress    ().map(|e| e as _),
-            File      => self.get_file_egress     ().map(|e| e as _),
-            Buffer    => self.get_buffer_egress   ().map(|e| e as _),
+            WebRTC => self.get_webrtc_egress().map(|e| e as _),
+            Flute => self.get_flute_egress().map(|e| e as _),
+            File => self.get_file_egress().map(|e| e as _),
+            Buffer => self.get_buffer_egress().map(|e| e as _),
+            Moq => self.get_moq_egress().map(|e| e as _),
         }
     }
 
-    pub fn get_egresses(
-        &self,
-        kinds: &[EgressProtocolType],
-    ) -> Vec<Arc<dyn EgressProtocol>> {
-        kinds.iter()
+    pub fn get_egresses(&self, kinds: &[EgressProtocolType]) -> Vec<Arc<dyn EgressProtocol>> {
+        kinds
+            .iter()
             .filter_map(|kind| self.get_egress(kind))
             .collect()
     }
-
 
     #[instrument(skip_all)]
     pub fn set_webrtc_egress(&self, egress: Arc<WebRTCEgress>) {
@@ -156,7 +157,7 @@ impl StreamManager {
     pub fn set_flute_egress(&self, egress: Arc<FluteEgress>) {
         *self.flute_egress.write().unwrap() = Some(egress);
     }
-    
+
     #[instrument(skip_all)]
     pub fn get_flute_egress(&self) -> Option<Arc<FluteEgress>> {
         self.flute_egress.read().unwrap().clone()
@@ -166,7 +167,7 @@ impl StreamManager {
     pub fn set_file_egress(&self, egress: Arc<FileEgress>) {
         *self.file_egress.write().unwrap() = Some(egress);
     }
-    
+
     #[instrument(skip_all)]
     pub fn get_file_egress(&self) -> Option<Arc<FileEgress>> {
         self.file_egress.read().unwrap().clone()
@@ -176,10 +177,20 @@ impl StreamManager {
     pub fn set_buffer_egress(&self, egress: Arc<BufferEgress>) {
         *self.buffer_egress.write().unwrap() = Some(egress);
     }
-    
+
     #[instrument(skip_all)]
     pub fn get_buffer_egress(&self) -> Option<Arc<BufferEgress>> {
         self.buffer_egress.read().unwrap().clone()
+    }
+
+    #[instrument(skip_all)]
+    pub fn set_moq_egress(&self, egress: Arc<MoqEgress>) {
+        *self.moq_egress.write().unwrap() = Some(egress);
+    }
+
+    #[instrument(skip_all)]
+    pub fn get_moq_egress(&self) -> Option<Arc<MoqEgress>> {
+        self.moq_egress.read().unwrap().clone()
     }
 
     // Methods to set and get ingress protocol singletons
@@ -198,7 +209,9 @@ impl StreamManager {
     }
 
     #[instrument(skip_all)]
-    pub fn get_websocket_ingress(&self) -> Option<Arc<crate::ingress::websocket::WebSocketIngress>> {
+    pub fn get_websocket_ingress(
+        &self,
+    ) -> Option<Arc<crate::ingress::websocket::WebSocketIngress>> {
         self.websocket_ingress.read().unwrap().clone()
     }
 

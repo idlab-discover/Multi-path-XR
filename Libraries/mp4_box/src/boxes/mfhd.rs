@@ -22,7 +22,7 @@ impl Default for MfhdBox {
         MfhdBox {
             version: 0,
             flags: 0,
-            sequence_number: 1,  // Typically starts at 1
+            sequence_number: 1, // Typically starts at 1
         }
     }
 }
@@ -39,12 +39,13 @@ impl std::fmt::Debug for MfhdBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `MfhdBox` struct.
 impl Mp4Box for MfhdBox {
     // Returns the box type as a 4-byte array. For `MfhdBox`, the type is "mfhd".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mfhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mfhd"
+    }
 
     // Calculates the size of the `MfhdBox` in bytes.
     // The size is fixed at 16 bytes, which includes:
@@ -53,7 +54,7 @@ impl Mp4Box for MfhdBox {
     // - 4 bytes for the `sequence_number` field.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 4 + 4  // Header + version/flags + sequence_number
+        8 + 4 + 4 // Header + version/flags + sequence_number
     }
 
     // Writes the `MfhdBox` to the provided buffer.
@@ -66,8 +67,8 @@ impl Mp4Box for MfhdBox {
         buffer.extend_from_slice(&self.box_type());
         // Write the version (1 byte) and flags (3 bytes).
         buffer.push(self.version);
-        buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]);  // 3-byte flags
-        // Write the `sequence_number` field in big-endian format.
+        buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]); // 3-byte flags
+                                                                                 // Write the `sequence_number` field in big-endian format.
         buffer.extend_from_slice(&self.sequence_number.to_be_bytes());
     }
 
@@ -91,7 +92,7 @@ impl Mp4Box for MfhdBox {
                 flags,
                 sequence_number,
             },
-            size
+            size,
         ))
     }
 }

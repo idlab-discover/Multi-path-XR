@@ -1,12 +1,11 @@
+use crate::processing::ProcessingPipeline;
+use crate::services::stream_manager::StreamManager;
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 use tracing::instrument;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
-use crate::services::stream_manager::StreamManager;
-use crate::processing::ProcessingPipeline;
-
 
 pub struct WebRTCIngress {
     data_channels: Arc<RwLock<HashMap<String, Arc<RTCDataChannel>>>>,
@@ -41,9 +40,13 @@ impl WebRTCIngress {
         stream_manager.set_webrtc_ingress(instance.clone());
     }
 
+    #[allow(dead_code)]
     #[instrument(skip_all)]
     pub fn add_data_channel(&self, stream_id: String, data_channel: Arc<RTCDataChannel>) {
-        self.data_channels.write().unwrap().insert(stream_id.clone(), data_channel.clone());
+        self.data_channels
+            .write()
+            .unwrap()
+            .insert(stream_id.clone(), data_channel.clone());
 
         let processing_pipeline = self.processing_pipeline.clone();
         let stream_manager = self.stream_manager.clone();
@@ -53,7 +56,11 @@ impl WebRTCIngress {
             let stream_manager_clone = stream_manager.clone();
             let processing_pipeline_clone = processing_pipeline.clone();
             Box::pin(async move {
-                processing_pipeline_clone.push_to_decoder(msg.data.to_vec(), stream_manager_clone, stream_id_clone);
+                processing_pipeline_clone.push_to_decoder(
+                    msg.data.to_vec(),
+                    stream_manager_clone,
+                    stream_id_clone,
+                );
             })
         }));
 
@@ -64,5 +71,4 @@ impl WebRTCIngress {
     pub fn remove_data_channel(&self, stream_id: &str) {
         self.data_channels.write().unwrap().remove(stream_id);
     }
-
 }

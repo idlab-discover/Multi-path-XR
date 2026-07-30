@@ -1,9 +1,9 @@
 // egress/protocols/webtransport.rs
 // (WebTransport supports prioritization)
-use crate::encoders::EncodingFormat;
 use crate::protocols::traits::EgressProtocol;
-use webtransport::session::WebTransportSession;
+use spatial_codecs::encoder::EncodingFormat;
 use std::sync::Arc;
+use webtransport::session::WebTransportSession;
 
 use super::egress_common::EgressProtocol;
 
@@ -26,7 +26,7 @@ impl EgressProtocol for WebTransportEgress {
     }
 
     #[inline]
-    fn max_number_of_points(&self) -> u64 {
-        *self.max_number_of_points.lock().unwrap()
+    fn max_number_of_primitives(&self) -> u64 {
+        *self.max_number_of_primitives.lock().unwrap()
     }
 }

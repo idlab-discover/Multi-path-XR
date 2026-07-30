@@ -1,6 +1,8 @@
 use crate::format_fourcc;
 
-use super::{generic::Mp4Box, meta::MetaBox, mvex::MvexBox, mvhd::MvhdBox, trak::TrakBox, udta::UdtaBox};
+use super::{
+    generic::Mp4Box, meta::MetaBox, mvex::MvexBox, mvhd::MvhdBox, trak::TrakBox, udta::UdtaBox,
+};
 
 // The `MoovBox` struct represents a Movie Box in the MP4 file format.
 // This box is a container for all the metadata related to the entire movie.
@@ -11,23 +13,30 @@ use super::{generic::Mp4Box, meta::MetaBox, mvex::MvexBox, mvhd::MvhdBox, trak::
 //
 // The `MoovBox` is one of the most important boxes in the MP4 file format as it holds the structural and timing metadata for the entire movie.
 #[derive(Default, Clone)]
-pub struct MoovBox { // Compressed Movie Box
-    pub mvhd: MvhdBox,             // Movie Header Box (mandatory)
-    pub traks: Vec<TrakBox>,       // One or more Track Boxes
-    pub mvex: Option<MvexBox>,     // Movie Extends Box (optional)
-    pub meta: Option<MetaBox>,     // Metadata Box (optional)
-    pub udta: Option<UdtaBox>,     // User Data Box (optional)
+pub struct MoovBox {
+    // Compressed Movie Box
+    pub mvhd: MvhdBox,         // Movie Header Box (mandatory)
+    pub traks: Vec<TrakBox>,   // One or more Track Boxes
+    pub mvex: Option<MvexBox>, // Movie Extends Box (optional)
+    pub meta: Option<MetaBox>, // Metadata Box (optional)
+    pub udta: Option<UdtaBox>, // User Data Box (optional)
 }
 
 impl std::fmt::Debug for MoovBox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_struct("MoovBox");
         dbg.field("box_size", &self.box_size())
-           .field("box_type", &format_fourcc(&self.box_type()))
-           .field("traks", &self.traks);
-        if self.mvex.is_some() { dbg.field("mvex", &self.mvex); }
-        if self.meta.is_some() { dbg.field("meta", &self.meta); }
-        if self.udta.is_some() { dbg.field("udta", &self.udta); }
+            .field("box_type", &format_fourcc(&self.box_type()))
+            .field("traks", &self.traks);
+        if self.mvex.is_some() {
+            dbg.field("mvex", &self.mvex);
+        }
+        if self.meta.is_some() {
+            dbg.field("meta", &self.meta);
+        }
+        if self.udta.is_some() {
+            dbg.field("udta", &self.udta);
+        }
         dbg.finish()
     }
 }
@@ -36,7 +45,9 @@ impl std::fmt::Debug for MoovBox {
 impl Mp4Box for MoovBox {
     // Returns the box type as a 4-byte array. For `MoovBox`, the type is "moov".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"moov" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"moov"
+    }
 
     // Calculates the size of the `MoovBox` in bytes.
     // The size includes:
@@ -46,11 +57,11 @@ impl Mp4Box for MoovBox {
     // - The size of the `MvexBox`.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + self.mvhd.box_size() +
-        self.traks.iter().map(|t| t.box_size()).sum::<u32>() +
-        self.mvex.as_ref().map_or(0, |b| b.box_size()) +
-        self.meta.as_ref().map_or(0, |b| b.box_size()) +
-        self.udta.as_ref().map_or(0, |b| b.box_size())
+        8 + self.mvhd.box_size()
+            + self.traks.iter().map(|t| t.box_size()).sum::<u32>()
+            + self.mvex.as_ref().map_or(0, |b| b.box_size())
+            + self.meta.as_ref().map_or(0, |b| b.box_size())
+            + self.udta.as_ref().map_or(0, |b| b.box_size())
     }
 
     // Writes the `MoovBox` to the provided buffer.
@@ -66,14 +77,22 @@ impl Mp4Box for MoovBox {
         let mvhd_size = self.mvhd.box_size() as usize;
         self.mvhd.write_box(buffer);
         if buffer.len() != current_size + mvhd_size {
-            panic!("Error writing MvhdBox: expected size {}, got {}", mvhd_size, buffer.len() - current_size);
+            panic!(
+                "Error writing MvhdBox: expected size {}, got {}",
+                mvhd_size,
+                buffer.len() - current_size
+            );
         }
         for trak in &self.traks {
             let current_size = buffer.len();
             let trak_size = trak.box_size() as usize;
             trak.write_box(buffer);
             if buffer.len() != current_size + trak_size {
-                panic!("Error writing TrakBox: expected size {}, got {}", trak_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing TrakBox: expected size {}, got {}",
+                    trak_size,
+                    buffer.len() - current_size
+                );
             }
         }
         if let Some(mvex) = &self.mvex {
@@ -81,7 +100,11 @@ impl Mp4Box for MoovBox {
             let mvex_size = mvex.box_size() as usize;
             mvex.write_box(buffer);
             if buffer.len() != current_size + mvex_size {
-                panic!("Error writing MvexBox: expected size {}, got {}", mvex_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing MvexBox: expected size {}, got {}",
+                    mvex_size,
+                    buffer.len() - current_size
+                );
             }
         }
         if let Some(meta) = &self.meta {
@@ -89,7 +112,11 @@ impl Mp4Box for MoovBox {
             let meta_size = meta.box_size() as usize;
             meta.write_box(buffer);
             if buffer.len() != current_size + meta_size {
-                panic!("Error writing MetaBox: expected size {}, got {}", meta_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing MetaBox: expected size {}, got {}",
+                    meta_size,
+                    buffer.len() - current_size
+                );
             }
         }
         if let Some(udta) = &self.udta {
@@ -97,7 +124,11 @@ impl Mp4Box for MoovBox {
             let udta_size = udta.box_size() as usize;
             udta.write_box(buffer);
             if buffer.len() != current_size + udta_size {
-                panic!("Error writing UdtaBox: expected size {}, got {}", udta_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing UdtaBox: expected size {}, got {}",
+                    udta_size,
+                    buffer.len() - current_size
+                );
             }
         }
     }
@@ -121,7 +152,7 @@ impl Mp4Box for MoovBox {
         let mut udta = None;
 
         while offset < size {
-            let box_type = &data[offset+4..offset+8];
+            let box_type = &data[offset + 4..offset + 8];
             // let sub_box_size = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
 
             match box_type {
@@ -156,8 +187,14 @@ impl Mp4Box for MoovBox {
         }
 
         Ok((
-            MoovBox { mvhd, traks, mvex, meta, udta },
-            size
+            MoovBox {
+                mvhd,
+                traks,
+                mvex,
+                meta,
+                udta,
+            },
+            size,
         ))
     }
 }

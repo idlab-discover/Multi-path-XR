@@ -1,8 +1,8 @@
+use crate::types::{AppState, EgressProtocolType, StreamPayloadFormat};
 use axum::extract::{Json, Query, State};
-use tracing::instrument;
-use crate::types::{AppState, EgressProtocolType};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
+use tracing::instrument;
 
 fn deserialize_csv_u8<'de, D>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error>
 where
@@ -21,7 +21,9 @@ where
     }
 }
 
-pub fn deserialize_f32_array3_semicolon<'de, D>(deserializer: D) -> Result<Option<[f32; 3]>, D::Error>
+pub fn deserialize_f32_array3_semicolon<'de, D>(
+    deserializer: D,
+) -> Result<Option<[f32; 3]>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -29,9 +31,8 @@ where
     let parts: Vec<f32> = s
         .split(';')
         .map(|x| {
-            f32::from_str(x.trim()).map_err(|_| {
-                de::Error::custom(format!("invalid float: {}", x.trim()))
-            })
+            f32::from_str(x.trim())
+                .map_err(|_| de::Error::custom(format!("invalid float: {}", x.trim())))
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -58,11 +59,12 @@ pub struct UpdateStreamSettingsRequest {
     #[serde(default, deserialize_with = "deserialize_f32_array3_semicolon")]
     pub scale: Option<[f32; 3]>,
     pub presentation_time_offset: Option<u64>,
+    pub input_format: Option<StreamPayloadFormat>,
     pub decode_bypass: Option<bool>,
     pub aggregator_bypass: Option<bool>,
     pub ring_buffer_bypass: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_csv_u8")]
-    pub max_point_percentages: Option<Vec<u8>>,   // e.g. [15, 25, 60]
+    pub max_primitive_percentages: Option<Vec<u8>>, // e.g. [15, 25, 60]
 }
 
 #[derive(Serialize, Debug)]
@@ -89,7 +91,6 @@ pub async fn update_stream_settings(
         settings.egress_protocols = egress_protocols;
     }
 
-
     if let Some(process_incoming_frames) = request.process_incoming_frames {
         settings.process_incoming_frames = process_incoming_frames;
     }
@@ -101,7 +102,7 @@ pub async fn update_stream_settings(
     if let Some(rotation) = request.rotation {
         settings.rotation = rotation;
     }
-    
+
     if let Some(scale) = request.scale {
         settings.scale = scale;
     }
@@ -110,8 +111,12 @@ pub async fn update_stream_settings(
         settings.presentation_time_offset = Some(presentation_time_offset);
     }
 
+    if let Some(input_format) = request.input_format {
+        settings.input_format = input_format;
+    }
+
     if let Some(decode_bypass) = request.decode_bypass {
-        settings.decode_bypass = decode_bypass;        
+        settings.decode_bypass = decode_bypass;
     }
 
     if let Some(aggregator_bypass) = request.aggregator_bypass {
@@ -122,16 +127,18 @@ pub async fn update_stream_settings(
         settings.ring_buffer_bypass = ring_buffer_bypass;
     }
 
-    if let Some(max_point_percentages) = request.max_point_percentages {
-        settings.max_point_percentages = Some(max_point_percentages);
+    if let Some(max_primitive_percentages) = request.max_primitive_percentages {
+        settings.max_primitive_percentages = Some(max_primitive_percentages);
     }
-
 
     // Update the stream settings in StreamManager
     stream_manager.update_stream_settings(settings);
 
     Json(UpdateStreamSettingsResponse {
-        message: format!("Stream settings updated for stream_id {}", request.stream_id),
+        message: format!(
+            "Stream settings updated for stream_id {}",
+            request.stream_id
+        ),
     })
 }
 
@@ -158,13 +165,16 @@ pub async fn list_streams(State(state): State<AppState>) -> Json<StreamListRespo
             rotation: Some(settings.rotation),
             scale: Some(settings.scale),
             presentation_time_offset: settings.presentation_time_offset,
+            input_format: Some(settings.input_format),
 
             decode_bypass: Some(settings.decode_bypass),
             aggregator_bypass: Some(settings.aggregator_bypass),
             ring_buffer_bypass: Some(settings.ring_buffer_bypass),
-            max_point_percentages: settings.max_point_percentages.clone(),
+            max_primitive_percentages: settings.max_primitive_percentages.clone(),
         })
         .collect();
 
-    Json(StreamListResponse { streams: all_settings })
+    Json(StreamListResponse {
+        streams: all_settings,
+    })
 }

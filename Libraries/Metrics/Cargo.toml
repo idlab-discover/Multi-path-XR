@@ -13,6 +13,7 @@ tracing-subscriber.workspace = true
 tracing.workspace = true
 once_cell.workspace = true
 dashmap.workspace = true
+clap.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib", "staticlib"] # Allows you to build both a shared library and a Rust library

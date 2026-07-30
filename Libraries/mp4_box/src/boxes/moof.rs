@@ -10,8 +10,9 @@ use super::{generic::Mp4Box, mfhd::MfhdBox, traf::TrafBox};
 //
 // The `MoofBox` is essential for enabling fragmented MP4 playback, where media data is split into multiple fragments.
 #[derive(Default, Clone)]
-pub struct MoofBox { // Movie Fragment Box
-    pub mfhd: MfhdBox, // Movie Fragment Header Box
+pub struct MoofBox {
+    // Movie Fragment Box
+    pub mfhd: MfhdBox,       // Movie Fragment Header Box
     pub trafs: Vec<TrafBox>, // One or more Track Fragment Boxes
 }
 
@@ -30,7 +31,9 @@ impl std::fmt::Debug for MoofBox {
 impl Mp4Box for MoofBox {
     // Returns the box type as a 4-byte array. For `MoofBox`, the type is "moof".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"moof" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"moof"
+    }
 
     // Calculates the size of the `MoofBox` in bytes.
     // The size includes:
@@ -58,7 +61,11 @@ impl Mp4Box for MoofBox {
             let traf_size = traf.box_size() as usize;
             traf.write_box(buffer);
             if buffer.len() != current_size + traf_size {
-                panic!("Error writing TrafBox: expected size {}, got {}", traf_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing TrafBox: expected size {}, got {}",
+                    traf_size,
+                    buffer.len() - current_size
+                );
             }
         }
     }
@@ -80,7 +87,7 @@ impl Mp4Box for MoofBox {
 
         let mut trafs = Vec::new();
         while offset < size {
-            let box_type = &data[offset+4..offset+8];
+            let box_type = &data[offset + 4..offset + 8];
             if box_type != b"traf" {
                 return Err(format!("Unexpected box type in MOOF: {box_type:?}"));
             }
@@ -93,9 +100,6 @@ impl Mp4Box for MoofBox {
             return Err("MOOF box must contain at least one TRAF box".into());
         }
 
-        Ok((
-            MoofBox { mfhd, trafs },
-            size
-        ))
+        Ok((MoofBox { mfhd, trafs }, size))
     }
 }

@@ -14,7 +14,8 @@ use super::generic::Mp4Box;
 // The `SttsBox` is essential for enabling accurate playback timing, as it provides the mapping
 // between sample indices and their corresponding decoding times.
 #[derive(Clone)]
-pub struct SttsBox { // Time to Sample Box
+pub struct SttsBox {
+    // Time to Sample Box
     pub version: u8,
     pub flags: u32,
     pub entries: Vec<SttsEntry>, // List of time-to-sample entries
@@ -26,7 +27,6 @@ pub struct SttsEntry {
     pub sample_delta: u32,
 }
 
-
 // Provides a default implementation for the `SttsBox` struct.
 // The default `SttsBox` represents an empty box with no entries.
 impl Default for SttsBox {
@@ -34,9 +34,7 @@ impl Default for SttsBox {
         SttsBox {
             version: 0,
             flags: 0,
-            entries: vec![
-                SttsEntry::default()
-            ],
+            entries: vec![SttsEntry::default()],
         }
     }
 }
@@ -53,7 +51,6 @@ impl std::fmt::Debug for SttsBox {
     }
 }
 
-
 impl std::fmt::Debug for SttsEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SttsEntry")
@@ -67,7 +64,9 @@ impl std::fmt::Debug for SttsEntry {
 impl Mp4Box for SttsBox {
     // Returns the box type as a 4-byte array. For `SttsBox`, the type is "stts".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"stts" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"stts"
+    }
 
     // Calculates the size of the `SttsBox` in bytes.
     // The size is fixed at 16 bytes, which includes:
@@ -86,9 +85,9 @@ impl Mp4Box for SttsBox {
     fn write_box(&self, buffer: &mut Vec<u8>) {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
-        buffer.push(0);  // version
-        buffer.extend_from_slice(&[0; 3]);  // flags
-        buffer.extend_from_slice(&0u32.to_be_bytes());  // entry_count = 0
+        buffer.push(0); // version
+        buffer.extend_from_slice(&[0; 3]); // flags
+        buffer.extend_from_slice(&0u32.to_be_bytes()); // entry_count = 0
 
         for entry in &self.entries {
             buffer.extend_from_slice(&entry.sample_count.to_be_bytes());
@@ -115,13 +114,25 @@ impl Mp4Box for SttsBox {
         let mut offset = 16;
 
         for _ in 0..entry_count {
-            if offset + 8 > size { return Err("Incomplete STTS entry".into()); }
-            let sample_count = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
-            let sample_delta = u32::from_be_bytes(data[offset+4..offset+8].try_into().unwrap());
-            entries.push(SttsEntry { sample_count, sample_delta });
+            if offset + 8 > size {
+                return Err("Incomplete STTS entry".into());
+            }
+            let sample_count = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+            let sample_delta = u32::from_be_bytes(data[offset + 4..offset + 8].try_into().unwrap());
+            entries.push(SttsEntry {
+                sample_count,
+                sample_delta,
+            });
             offset += 8;
         }
 
-        Ok((SttsBox { version, flags, entries }, size))
+        Ok((
+            SttsBox {
+                version,
+                flags,
+                entries,
+            },
+            size,
+        ))
     }
 }

@@ -1,9 +1,9 @@
 // handlers/frames.rs
 
-use axum::extract::State;
-use tracing::instrument;
 use crate::types::AppState;
+use axum::extract::State;
 use axum::Json;
+use tracing::instrument;
 
 #[axum::debug_handler]
 #[instrument(skip_all)]
@@ -17,7 +17,7 @@ pub async fn receive_frame(
     state.processing_pipeline.push_to_decoder(
         data,
         state.stream_manager.clone(),
-        "manual".to_string()
+        "manual".to_string(),
     );
 
     Json(serde_json::json!({"status": "Frame pushed to processor"}))

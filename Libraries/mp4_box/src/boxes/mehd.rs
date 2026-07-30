@@ -1,17 +1,16 @@
-use crate::format_fourcc;
 use super::generic::Mp4Box;
+use crate::format_fourcc;
 
 /// The `MehdBox` represents the Movie Extends Header Box in fragmented MP4 files.
 /// It specifies the overall duration of the movie fragment.
-/// 
+///
 /// - `version`: Determines if `fragment_duration` is stored as 32-bit (version 0) or 64-bit (version 1).
 /// - `fragment_duration`: Duration of the entire presentation (in timescale units).
 #[derive(Default, Clone)]
 pub struct MehdBox {
-    pub version: u8,               // 0 or 1
-    pub fragment_duration: u64,    // Duration in timescale units
+    pub version: u8,            // 0 or 1
+    pub fragment_duration: u64, // Duration in timescale units
 }
-
 
 impl std::fmt::Debug for MehdBox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -26,7 +25,9 @@ impl std::fmt::Debug for MehdBox {
 
 impl Mp4Box for MehdBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mehd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mehd"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -78,8 +79,11 @@ impl Mp4Box for MehdBox {
         };
 
         Ok((
-            MehdBox { version, fragment_duration },
-            size
+            MehdBox {
+                version,
+                fragment_duration,
+            },
+            size,
         ))
     }
 }

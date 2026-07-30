@@ -1,12 +1,13 @@
+use socket2::{Domain, Socket, Type};
 use std::io;
 use std::net::{SocketAddr, TcpListener};
-use socket2::{Domain, Socket, Type};
 
 pub struct TcpListenerOpts {
     pub addr: SocketAddr,
-    pub backlog: i32,          // e.g., 1024
-    pub reuse_port: bool,      // best-effort on Unix
-    pub nonblocking: bool,     // true for tokio
+    pub backlog: i32,      // e.g., 1024
+    pub reuse_port: bool,  // best-effort on Unix
+    pub nonblocking: bool, // true for tokio
+    pub nodelay: bool,     // TCP_NODELAY
 }
 
 impl Default for TcpListenerOpts {
@@ -16,6 +17,7 @@ impl Default for TcpListenerOpts {
             backlog: 1024,
             reuse_port: true,
             nonblocking: true,
+            nodelay: true,
         }
     }
 }
@@ -36,6 +38,8 @@ pub fn build_tcp_listener(opts: TcpListenerOpts) -> io::Result<TcpListener> {
     if opts.nonblocking {
         sock.set_nonblocking(true)?;
     }
+
+    sock.set_tcp_nodelay(opts.nodelay)?;
 
     sock.bind(&opts.addr.into())?;
     sock.listen(opts.backlog)?;

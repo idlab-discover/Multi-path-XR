@@ -162,10 +162,10 @@ class Mininet( object ):
         self.listenPort = listenPort
         self.waitConn = waitConnected
 
-        self.hosts = []
-        self.switches = []
-        self.controllers = []
-        self.links = []
+        self.hosts: list[Host] = []
+        self.switches: list[OVSKernelSwitch] = []
+        self.controllers: list[Controller] = []
+        self.links: list[Link] = []
 
         self.nameToNode = {}  # name to Node (Host/Switch) objects
 
@@ -282,13 +282,13 @@ class Mininet( object ):
             controller = self.controller
         # Construct new controller if one is not given
         if isinstance( name, Controller ):
-            controller_new = name
+            controller_new: Controller = name
             # Pylint thinks controller is a str()
             # pylint: disable=maybe-no-member
             name = controller_new.name
             # pylint: enable=maybe-no-member
         else:
-            controller_new = controller( name, **params )
+            controller_new: Controller = controller( name, **params )
         # Add new controller to net
         if controller_new:  # allow controller-less setups
             self.controllers.append( controller_new )
@@ -403,7 +403,7 @@ class Mininet( object ):
         options.setdefault( 'addr1', self.randMac() )
         options.setdefault( 'addr2', self.randMac() )
         cls = self.link if cls is None else cls
-        link = cls( node1, node2, **options )
+        link: Link = cls( node1, node2, **options )
         self.links.append( link )
         return link
 

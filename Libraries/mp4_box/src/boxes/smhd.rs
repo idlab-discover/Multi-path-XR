@@ -1,23 +1,13 @@
-use crate::format_fourcc;
 use super::generic::Mp4Box;
+use crate::format_fourcc;
 
 /// The `SmhdBox` represents the Sound Media Header Box.
 /// It provides audio-specific information, like balance.
-#[derive(Clone)]
+#[derive(Clone, Default)] // Everything defaults to 0/empty/false
 pub struct SmhdBox {
     pub version: u8,
     pub flags: u32,
-    pub balance: i16,  // 8.8 fixed-point format
-}
-
-impl Default for SmhdBox {
-    fn default() -> Self {
-        SmhdBox {
-            version: 0,
-            flags: 0,
-            balance: 0,  // Centered audio
-        }
-    }
+    pub balance: i16, // 8.8 fixed-point format // 0 = centered, -1.0 = full left, +1.0 = full right
 }
 
 impl std::fmt::Debug for SmhdBox {
@@ -34,11 +24,13 @@ impl std::fmt::Debug for SmhdBox {
 
 impl Mp4Box for SmhdBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"smhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"smhd"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 4 + 4  // Header + version/flags + balance/reserved
+        8 + 4 + 4 // Header + version/flags + balance/reserved
     }
 
     #[inline]
@@ -48,7 +40,7 @@ impl Mp4Box for SmhdBox {
         buffer.push(self.version);
         buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]);
         buffer.extend_from_slice(&self.balance.to_be_bytes());
-        buffer.extend_from_slice(&0u16.to_be_bytes());  // reserved
+        buffer.extend_from_slice(&0u16.to_be_bytes()); // reserved
     }
 
     fn read_box(data: &[u8]) -> Result<(Self, usize), String> {
@@ -75,7 +67,7 @@ impl Mp4Box for SmhdBox {
                 flags,
                 balance,
             },
-            size
+            size,
         ))
     }
 }

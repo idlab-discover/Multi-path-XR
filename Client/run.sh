@@ -5,38 +5,69 @@ clear
 
 # Initialize the headless flag to false
 HEADLESS=false
+ENABLE_MOQ="false"
 
-# Parse the arguments to check for --headless
-for arg in "$@"; do
-    if [[ "$arg" == "--headless" ]]; then
-        HEADLESS=true
-        # Remove --headless from arguments
-        set -- "${@/--headless}"
-    fi
-done
+# Remember where the project lives
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Initialize a new array to hold non-empty arguments
 new_args=()
 RELEASE_MODE="false"
 
 for arg in "$@"; do
-    # Check if this argument is --release
-    if [[ "$arg" == "--release" ]]; then
-        RELEASE_MODE="true"
-        # Skip pushing this argument into new_args,
-        # so it won't be passed to the final executable.
-    elif [[ -n "$arg" ]]; then # Add non-empty arguments to the new array
-        # Trim trailing spaces and add to the new array
-        trimmed_arg=$(echo "$arg" | sed 's/[[:space:]]*$//')
-        new_args+=("$trimmed_arg")
-    fi
+    case "$arg" in
+        --headless)
+            HEADLESS=true
+            ;;
+        --release)
+            RELEASE_MODE="true"
+            ;;
+        --enable-moq)
+            ENABLE_MOQ="true"
+            ;;
+        *)
+            if [[ -n "$arg" ]]; then
+                trimmed_arg=$(echo "$arg" | sed 's/[[:space:]]*$//')
+                new_args+=("$trimmed_arg")
+            fi
+            ;;
+    esac
 done
 
 # Overwrite positional parameters with the new arguments
 set -- "${new_args[@]}"
+ARGS=("$@")
 
-# Get the directory of the script
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$ENABLE_MOQ" == "true" ]]; then
+    DEFAULT_URL="moqt://127.0.0.1:4443/multipathxr"
+    DEFAULT_NAMESPACE="multipathxr"
+    DEFAULT_BIND="[::]:0"
+
+    has_flag() {
+        local flag="$1"
+        for candidate in "${ARGS[@]}"; do
+            if [[ "$candidate" == "$flag" ]]; then
+                return 0
+            fi
+        done
+        return 1
+    }
+
+    add_flag() {
+        local flag="$1"
+        local value="$2"
+        if [[ -z "$value" ]] || has_flag "$flag"; then
+            return
+        fi
+        ARGS+=("$flag" "$value")
+    }
+
+    add_flag "--moq-url" "${DEFAULT_URL}"
+    add_flag "--moq-namespace" "${DEFAULT_NAMESPACE}"
+    add_flag "--moq-bind" "${DEFAULT_BIND}"
+
+    set -- "${ARGS[@]}"
+fi
 
 # Move to the directory of the script
 cd "$SCRIPT_DIR"
@@ -63,9 +94,9 @@ if [[ "$HEADLESS" == true ]]; then
     # Execute the target executable and pass all arguments
     if [[ $# -gt 0 ]]; then
         echo "$EXECUTABLE" "$@"
-        "$EXECUTABLE" "$@"
+        exec "$EXECUTABLE" "$@"
     else
-        "$EXECUTABLE"
+        exec "$EXECUTABLE"
     fi
 
 else
@@ -88,10 +119,10 @@ else
 
     # Execute the target executable and pass all arguments
     if [[ $# -gt 0 ]]; then
-        echo "$EXECUTABLE" "$@" -logfile -
-        "$EXECUTABLE" "$@" -logfile -
+        echo "$EXECUTABLE" "$@" -force-vulkan -logfile -
+        exec "$EXECUTABLE" "$@" -force-vulkan -logfile -
     else
-        "$EXECUTABLE"
+        exec "$EXECUTABLE" -force-vulkan
     fi
 fi
 

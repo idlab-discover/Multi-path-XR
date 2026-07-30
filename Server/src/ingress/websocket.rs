@@ -1,9 +1,9 @@
-use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
-use socketioxide::extract::{Data, SocketRef};
-use tracing::instrument;
-use crate::services::stream_manager::StreamManager;
 use crate::processing::ProcessingPipeline;
+use crate::services::stream_manager::StreamManager;
+use socketioxide::extract::{Data, SocketRef};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use tracing::instrument;
 
 #[derive(Debug)]
 pub struct WebSocketIngress {
@@ -30,7 +30,10 @@ impl WebSocketIngress {
 
     #[instrument(skip_all)]
     pub fn add_socket(&self, stream_id: String, socket: Arc<SocketRef>) {
-        self.sockets.write().unwrap().insert(stream_id.clone(), socket.clone());
+        self.sockets
+            .write()
+            .unwrap()
+            .insert(stream_id.clone(), socket.clone());
 
         let processing_pipeline = self.processing_pipeline.clone();
         let stream_manager = self.stream_manager.clone();
@@ -39,9 +42,11 @@ impl WebSocketIngress {
             let stream_manager_clone = stream_manager.clone();
             let processing_pipeline_clone = processing_pipeline.clone();
 
-            processing_pipeline_clone.push_to_decoder(data.clone(), stream_manager_clone, stream_id_clone);
+            processing_pipeline_clone.push_to_decoder(
+                data.clone(),
+                stream_manager_clone,
+                stream_id_clone,
+            );
         });
-
-
     }
 }

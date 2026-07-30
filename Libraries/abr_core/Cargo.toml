@@ -1,0 +1,13 @@
+[package]
+name = "abr_core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "decision_hot_path"
+harness = false

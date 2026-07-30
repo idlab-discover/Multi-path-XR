@@ -28,15 +28,7 @@
                     </select>
                 </div>
                 <div class="control-group">
-                    <label for="environmentSelect">Choose an Environment:</label>
-                    <select id="environmentSelect">
-                        <option value="mininet">Mininet</option>
-                        <option value="docker">Docker</option>
-                        <option value="virtual_wall">Virtual Wall</option>
-                    </select>
-                </div>
-                <div class="control-group">
-                    <label for="autoStopTime">Auto‑stop after (seconds):</label>
+                    <label for="autoStopTime">Auto-stop after (seconds):</label>
                     <input  type="number"
                             id="autoStopTime"
                             name="autoStopTime"
@@ -47,8 +39,17 @@
                     <label>
                         <input  type="checkbox"
                                 id="autoNextExperiment">
-                        Auto‑start next experiment when finished
+                        Auto-start next experiment when finished
                     </label>
+                </div>
+                <div class="control-group">
+                    <label for="autoSweepRepeatCount">Additional full sweeps:</label>
+                    <input  type="number"
+                            id="autoSweepRepeatCount"
+                            name="autoSweepRepeatCount"
+                            min="0"
+                            step="1"
+                            value="0">
                 </div>
                 <div class="buttons">
                     <button id="startBtn">Start Environment</button>
@@ -56,16 +57,6 @@
                 </div>
                 <br>
                 <div id="experimentDescription" class="description"></div>
-            </div>
-            <div class="box">
-                <div class="control-group">
-                    <label for="n_nodes">Number of Nodes:</label>
-                    <input type="number" id="n_nodes" name="n_nodes" min="1" value="3" disabled>
-                </div>
-                <div class="control-group">
-                    <label for="n_paths">Number of Paths:</label>
-                    <input type="number" id="n_paths" name="n_paths" min="1" value="2" disabled>
-                </div>
             </div>
             <!-- Shared div for sections dependent on network status -->
             <div id="networkSections" class="hidden">
@@ -162,8 +153,8 @@
                         </select>
                         </div>
                         <div class="control-group">
-                        <label for="inp-egress-max-points">max_number_of_points (optional, u64):</label>
-                        <input type="number" id="inp-egress-max-points" placeholder="Maximum points" value="100000">
+                        <label for="inp-egress-max-primitives">max_number_of_primitives (optional, u64):</label>
+                        <input type="number" id="inp-egress-max-primitives" placeholder="Maximum primitives" value="100000">
                         </div>
                         <div class="control-group">
                         <label for="inp-egress-emit">emit_with_ack (optional, bool):</label>

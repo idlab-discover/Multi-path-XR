@@ -1,11 +1,11 @@
 //! DASH manifest data structures (MPD and related types).
 //! These represent parsed MPEG-DASH metadata including segment timing and adaptation sets.
 
-pub mod parser;
 pub mod builder;
+pub mod parser;
 
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 /// A single video/audio representation within an adaptation set.
 #[derive(Debug, Clone)]

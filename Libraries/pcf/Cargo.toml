@@ -1,0 +1,21 @@
+[package]
+name = "pcf"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"] # Allows you to build both a shared library and a Rust library
+
+[[bin]]
+name = "pcf_bench"
+path = "src/bin/pcf_bench.rs"
+
+[dependencies]
+spatial_utils.workspace = true
+shared_utils.workspace = true
+spatial_codecs.workspace = true
+bitflags.workspace = true
+indicatif.workspace = true
+serde.workspace = true
+toml.workspace = true
+clap.workspace = true

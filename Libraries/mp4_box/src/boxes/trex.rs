@@ -14,7 +14,8 @@ use super::generic::Mp4Box;
 /// - `default_sample_size`: Default size for each sample.
 /// - `default_sample_flags`: Default sample flags for each sample.
 #[derive(Clone)]
-pub struct TrexBox { // Track Extends Box
+pub struct TrexBox {
+    // Track Extends Box
     pub version: u8,
     pub flags: u32,
     pub track_id: u32,
@@ -46,17 +47,25 @@ impl std::fmt::Debug for TrexBox {
             .field("version", &self.version)
             .field("flags", &format!("0x{:06X}", self.flags))
             .field("track_id", &self.track_id)
-            .field("default_sample_description_index", &self.default_sample_description_index)
+            .field(
+                "default_sample_description_index",
+                &self.default_sample_description_index,
+            )
             .field("default_sample_duration", &self.default_sample_duration)
             .field("default_sample_size", &self.default_sample_size)
-            .field("default_sample_flags", &format!("0x{:08X}", self.default_sample_flags))
+            .field(
+                "default_sample_flags",
+                &format!("0x{:08X}", self.default_sample_flags),
+            )
             .finish()
     }
 }
 
 impl Mp4Box for TrexBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"trex" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"trex"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -103,7 +112,7 @@ impl Mp4Box for TrexBox {
                 default_sample_size,
                 default_sample_flags,
             },
-            size
+            size,
         ))
     }
 }

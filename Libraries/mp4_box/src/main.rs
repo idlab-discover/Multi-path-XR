@@ -2,8 +2,8 @@ use std::env;
 use std::fs;
 use std::process;
 
-use mp4_box::reader::{parse_mp4_boxes, extract_mdat_boxes};
-use mp4_box::writer::{Mp4StreamConfig, create_init_segment, create_media_segment};
+use mp4_box::reader::{extract_mdat_boxes, parse_mp4_boxes};
+use mp4_box::writer::{create_init_segment, create_media_segment, Mp4StreamConfig};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -37,7 +37,11 @@ fn run_file_mode(filename: &str) {
         }
     };
 
-    println!("Parsed {} top-level boxes from '{}':\n", boxes.len(), filename);
+    println!(
+        "Parsed {} top-level boxes from '{}':\n",
+        boxes.len(),
+        filename
+    );
     for (i, mp4_box) in boxes.iter().enumerate() {
         println!("Box {}:\n{:#?}\n", i + 1, mp4_box);
     }
@@ -53,7 +57,7 @@ fn run_test_mode() {
         codec_fourcc: *b"dra ",
         track_id: 1,
         default_sample_duration: 1000,
-        codec_name: "PointCloudCodec_dra".to_string(),
+        codec_name: "SpatialCodec_dra".to_string(),
     };
 
     // 1️⃣ Create INIT segment
@@ -74,7 +78,7 @@ fn run_test_mode() {
     }
 
     // 2️⃣ Create MEDIA segment with static frame data
-    let frame_data = vec![0u8; 1024];  // Static dummy frame data
+    let frame_data = vec![0u8; 1024]; // Static dummy frame data
     let media_buffer = create_media_segment(&config, frame_data, 1, 0);
     println!("Generated MEDIA segment ({} bytes)", media_buffer.len());
 
@@ -94,7 +98,10 @@ fn run_test_mode() {
     // 3️⃣ Optionally extract mdat boxes
     match extract_mdat_boxes(&media_buffer) {
         Ok(mdat_boxes) => {
-            println!("Extracted {} mdat box(es) from MEDIA segment.\n", mdat_boxes.len());
+            println!(
+                "Extracted {} mdat box(es) from MEDIA segment.\n",
+                mdat_boxes.len()
+            );
         }
         Err(e) => {
             eprintln!("Failed to extract mdat boxes: {e}");

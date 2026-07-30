@@ -100,6 +100,7 @@ impl MpdBuilder {
      * The media is the URL of the media segments for the representation.
      * The media segments are numbered using the $Number%09d$ placeholder.
      */
+    #[allow(clippy::too_many_arguments)]
     pub fn add_representation(
         mut self,
         id: &str,

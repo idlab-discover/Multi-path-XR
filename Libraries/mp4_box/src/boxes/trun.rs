@@ -11,7 +11,8 @@ use super::generic::Mp4Box;
 /// - `data_offset`: Offset of first sample relative to `mdat`.
 /// - `sample_size`: Size of the single sample in bytes.
 #[derive(Clone)]
-pub struct TrunBox { // Track Fragment Run Box
+pub struct TrunBox {
+    // Track Fragment Run Box
     pub version: u8,
     pub flags: u32,
     pub data_offset: i32,
@@ -44,11 +45,13 @@ impl std::fmt::Debug for TrunBox {
 
 impl Mp4Box for TrunBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"trun" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"trun"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 4 + 4 + 4 + 4  // header + version/flags + sample_count + data_offset + sample_size
+        8 + 4 + 4 + 4 + 4 // header + version/flags + sample_count + data_offset + sample_size
     }
 
     #[inline]
@@ -58,7 +61,7 @@ impl Mp4Box for TrunBox {
         buffer.push(self.version);
         buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]);
         buffer.extend_from_slice(&1u32.to_be_bytes()); // sample_count = 1
-        buffer.extend_from_slice(&(self.data_offset as i32).to_be_bytes());
+        buffer.extend_from_slice(&self.data_offset.to_be_bytes());
         buffer.extend_from_slice(&self.sample_size.to_be_bytes());
     }
 
@@ -92,7 +95,7 @@ impl Mp4Box for TrunBox {
                 data_offset,
                 sample_size,
             },
-            size
+            size,
         ))
     }
 }

@@ -1,9 +1,9 @@
 use axum::extract::Query;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
 use std::fs;
 use std::path::Path;
+use tracing::instrument;
 
 #[derive(Serialize, Debug)]
 pub struct Dataset {
@@ -28,7 +28,6 @@ pub struct PcFileQuery {
     pc_folder: String,
 }
 
-
 #[instrument(skip_all)]
 pub async fn list_datasets() -> Json<DatasetList> {
     let datasets_path = Path::new("../Datasets");
@@ -48,7 +47,9 @@ pub async fn list_datasets() -> Json<DatasetList> {
                         for sub_entry in sub_entries.flatten() {
                             let sub_path = sub_entry.path();
                             if sub_path.is_dir() {
-                                if let Some(sub_folder_name) = sub_path.file_name().and_then(|name| name.to_str()) {
+                                if let Some(sub_folder_name) =
+                                    sub_path.file_name().and_then(|name| name.to_str())
+                                {
                                     if sub_folder_name.starts_with("Ply_") {
                                         ply_folders.push(sub_folder_name.to_string());
                                     } else if sub_folder_name.starts_with("Dra_") {

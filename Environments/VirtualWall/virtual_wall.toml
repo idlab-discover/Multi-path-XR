@@ -1,0 +1,31 @@
+# Default configuration for the Virtual Wall environment.
+
+# Path to the SLICES CLI binary. If omitted, the crate will try to locate `slices`
+# in the PATH or honour the SLICES_CLI_BIN environment variable.
+# slices_binary = "/usr/local/bin/slices"
+
+# Default SLICES project and experiment names.
+project = "volstr"
+experiment = "mpxr3"
+experiment_duration = "48h"
+
+# Default bare metal parameters
+site_id = "be-gent1-bi-baremetal1"
+image = "Ubuntu 24.04.3"
+flavor = "pc"
+resource_prefix = "vw"
+
+# SSH access defaults for machines provisioned through the Virtual Wall
+# ssh_username = "root"
+# ssh_private_key = "/path/to/private/key"
+
+# Location where generated resource specifications and state are stored.
+# state_dir = "/tmp/broadcastfxr/virtualwall"
+
+# Optional cloud-init template or resource specification file, relative or absolute paths.
+# cloud_init_template = "src/cloudinit/user-data.yaml"
+# resource_spec_template = "configs/base_spec.json"
+
+# Optional: git-ignored BI custom config JSON (e.g. wall2 staging).
+# You can also set this via env var: SLICES_BI_CUSTOM_CONFIG=/path/to/custom_bm_conf.json
+# bi_custom_config = "configs/custom_bm_conf.json"

@@ -1,0 +1,15 @@
+[package]
+name = "big-virtual-wall"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+virtual-wall = { path = "../VirtualWall" }
+tracing = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+futures = "0.3"

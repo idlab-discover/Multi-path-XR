@@ -1,30 +1,20 @@
-use crate::format_fourcc;
 use super::generic::Mp4Box;
+use crate::format_fourcc;
 
 /// Represents a single entry in the `CttsBox`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CttsEntry {
     pub sample_count: u32,
-    pub sample_offset: i32,  // Always stored as i32 for internal consistency
+    pub sample_offset: i32, // Always stored as i32 for internal consistency
 }
 
 /// The `CttsBox` represents the Composition Time to Sample Box in MP4.
 /// It maps samples to their composition time offsets.
-#[derive(Clone)]
+#[derive(Clone, Default)] // Everything defaults to 0/empty/false
 pub struct CttsBox {
     pub version: u8,
     pub flags: u32,
     pub entries: Vec<CttsEntry>,
-}
-
-impl Default for CttsBox {
-    fn default() -> Self {
-        CttsBox {
-            version: 0,
-            flags: 0,
-            entries: Vec::new(),
-        }
-    }
 }
 
 impl std::fmt::Debug for CttsBox {
@@ -41,7 +31,9 @@ impl std::fmt::Debug for CttsBox {
 
 impl Mp4Box for CttsBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"ctts" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"ctts"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
@@ -54,7 +46,7 @@ impl Mp4Box for CttsBox {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // Only 3 bytes for flags
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // Only 3 bytes for flags
 
         buffer.extend_from_slice(&(self.entries.len() as u32).to_be_bytes());
 
@@ -107,19 +99,26 @@ impl Mp4Box for CttsBox {
         let mut offset = 16;
 
         for _ in 0..entry_count {
-            let sample_count = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let sample_count = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             let sample_offset = match version {
-                0 => u32::from_be_bytes(data[offset+4..offset+8].try_into().unwrap()) as i32,
-                1 => i32::from_be_bytes(data[offset+4..offset+8].try_into().unwrap()),
+                0 => u32::from_be_bytes(data[offset + 4..offset + 8].try_into().unwrap()) as i32,
+                1 => i32::from_be_bytes(data[offset + 4..offset + 8].try_into().unwrap()),
                 _ => unreachable!(),
             };
-            entries.push(CttsEntry { sample_count, sample_offset });
+            entries.push(CttsEntry {
+                sample_count,
+                sample_offset,
+            });
             offset += 8;
         }
 
         Ok((
-            CttsBox { version, flags, entries },
-            size
+            CttsBox {
+                version,
+                flags,
+                entries,
+            },
+            size,
         ))
     }
 }

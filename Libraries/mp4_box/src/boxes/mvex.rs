@@ -8,9 +8,10 @@ use super::{generic::Mp4Box, mehd::MehdBox, trex::TrexBox};
 // - `trex_entries`: A vector of `TrexBox` instances, where each `TrexBox` provides default values for track fragments.
 //   There is typically one `TrexBox` per track in the movie.
 #[derive(Clone)]
-pub struct MvexBox { // Movie Extends Box
-    pub mehd: Option<MehdBox>,         // Movie Extends Header Box (optional)
-    pub trex_entries: Vec<TrexBox>,    // One TrexBox per track
+pub struct MvexBox {
+    // Movie Extends Box
+    pub mehd: Option<MehdBox>,      // Movie Extends Header Box (optional)
+    pub trex_entries: Vec<TrexBox>, // One TrexBox per track
 }
 
 // Provides a default implementation for the `MvexBox` struct.
@@ -19,9 +20,7 @@ impl Default for MvexBox {
     fn default() -> Self {
         MvexBox {
             mehd: None,
-            trex_entries: vec![
-                TrexBox::default()
-            ],
+            trex_entries: vec![TrexBox::default()],
         }
     }
 }
@@ -41,7 +40,9 @@ impl std::fmt::Debug for MvexBox {
 impl Mp4Box for MvexBox {
     // Returns the box type as a 4-byte array. For `MvexBox`, the type is "mvex".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mvex" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mvex"
+    }
 
     // Calculates the size of the `MvexBox` in bytes.
     // The size includes:
@@ -49,9 +50,12 @@ impl Mp4Box for MvexBox {
     // - The size of all `TrexBox` entries in the `trex_entries` vector.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 
-        + self.mehd.as_ref().map_or(0, |m| m.box_size()) 
-        + self.trex_entries.iter().map(|trex| trex.box_size()).sum::<u32>()
+        8 + self.mehd.as_ref().map_or(0, |m| m.box_size())
+            + self
+                .trex_entries
+                .iter()
+                .map(|trex| trex.box_size())
+                .sum::<u32>()
     }
 
     // Writes the `MvexBox` to the provided buffer.
@@ -68,8 +72,11 @@ impl Mp4Box for MvexBox {
             let mehd_size = mehd_box.box_size() as usize;
             mehd_box.write_box(buffer);
             if buffer.len() != current_size + mehd_size {
-                panic!("Error writing MehdBox: expected size {}, got {}", mehd_size, buffer.len() - current_size);
-                
+                panic!(
+                    "Error writing MehdBox: expected size {}, got {}",
+                    mehd_size,
+                    buffer.len() - current_size
+                );
             }
         }
         // Write the contents of each `TrexBox` in the `trex_entries` vector.
@@ -78,7 +85,11 @@ impl Mp4Box for MvexBox {
             let trex_size = trex.box_size() as usize;
             trex.write_box(buffer);
             if buffer.len() != current_size + trex_size {
-                panic!("Error writing TrexBox: expected size {}, got {}", trex_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing TrexBox: expected size {}, got {}",
+                    trex_size,
+                    buffer.len() - current_size
+                );
             }
         }
     }
@@ -102,7 +113,8 @@ impl Mp4Box for MvexBox {
             }
 
             let box_type = &data[offset + 4..offset + 8];
-            let sub_box_size = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let sub_box_size =
+                u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
 
             if offset + sub_box_size > size {
                 return Err("Sub-box size exceeds MVEX bounds".into());
@@ -115,11 +127,11 @@ impl Mp4Box for MvexBox {
                     }
                     let (parsed_mehd, _) = MehdBox::read_box(&data[offset..offset + sub_box_size])?;
                     mehd = Some(parsed_mehd);
-                },
+                }
                 b"trex" => {
                     let (parsed_trex, _) = TrexBox::read_box(&data[offset..offset + sub_box_size])?;
                     trex_entries.push(parsed_trex);
-                },
+                }
                 _ => return Err(format!("Unknown box type in MVEX: {box_type:?}")),
             }
 

@@ -1,8 +1,8 @@
 use crate::mpd::{AdaptationSet, MpdMetadata, Representation};
+use chrono::{DateTime, Utc};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::collections::HashMap;
-use chrono::{DateTime, Utc};
 
 #[allow(clippy::if_same_then_else)]
 fn infer_content_type(mime_type: &str) -> &str {
@@ -62,7 +62,11 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
 
                         let fallback = infer_content_type(&mime).to_string();
                         current_adaptation = Some(AdaptationSet {
-                            content_type: if !content.is_empty() { content } else { fallback },
+                            content_type: if !content.is_empty() {
+                                content
+                            } else {
+                                fallback
+                            },
                             mime_type: mime,
                             representations: vec![],
                             segment_template: None,
@@ -81,12 +85,14 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
                                 b"id" => id = attr.unescape_value()?.to_string(),
                                 b"bandwidth" => {
                                     bandwidth = attr.unescape_value()?.parse::<u64>()?;
-                                },
+                                }
                                 b"availabilityTimeOffset" => {
-                                    availability_time_offset = attr.unescape_value()?.parse::<f64>().ok();
+                                    availability_time_offset =
+                                        attr.unescape_value()?.parse::<f64>().ok();
                                 }
                                 b"availabilityTimeComplete" => {
-                                    availability_time_complete = attr.unescape_value()?.parse::<bool>().ok();
+                                    availability_time_complete =
+                                        attr.unescape_value()?.parse::<bool>().ok();
                                 }
                                 _ => {}
                             }
@@ -118,63 +124,41 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
 
                         if inside_rep {
                             if let Some(rep) = current_rep.as_mut() {
-
                                 rep.initialization = map
-
                                     .get("initialization")
-
                                     .unwrap_or(&"".to_string())
-
                                     .replace("$RepresentationID$", &rep.id);
 
                                 rep.media = map
-
                                     .get("media")
-
                                     .unwrap_or(&"".to_string())
-
                                     .replace("$RepresentationID$", &rep.id);
 
-
-
                                 if let Some(dur) = map.get("duration") {
-
                                     rep.segment_duration = dur.parse::<f64>().unwrap_or(1.0);
-
                                 }
 
                                 if let Some(ts) = map.get("timescale") {
-
                                     rep.timescale = ts.parse::<u64>().unwrap_or(1);
-
                                 }
 
                                 if let Some(ato) = map.get("availabilityTimeOffset") {
-
                                     rep.availability_time_offset = ato.parse::<f64>().ok();
-
                                 }
 
                                 if let Some(atc) = map.get("availabilityTimeComplete") {
-
                                     rep.availability_time_complete = atc.parse::<bool>().ok();
-
                                 }
 
                                 if let Some(pto) = map.get("presentationTimeOffset") {
-
                                     rep.presentation_time_offset = pto.parse::<u64>().ok();
-
                                 }
-
-
 
                                 rep.uses_segment_time = rep.media.contains("$Time$");
 
                                 rep.segment_duration /= rep.timescale as f64;
 
                                 rep.has_template = true;
-
                             }
                         } else {
                             adaptation_template = Some(map);
@@ -192,8 +176,7 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
                     "Representation" => {
                         inside_rep = false;
                         if let Some(mut rep) = current_rep.take() {
-                            if let Some(template) = adaptation_template
-                            .take() {
+                            if let Some(template) = adaptation_template.take() {
                                 rep.initialization = template
                                     .get("initialization")
                                     .unwrap_or(&"".to_string())
@@ -234,22 +217,26 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
                             adapt.segment_template = adaptation_template.take();
                             for rep in adapt.representations.iter_mut() {
                                 if !rep.has_template {
-                                    rep.initialization = adapt.segment_template
+                                    rep.initialization = adapt
+                                        .segment_template
                                         .as_ref()
                                         .and_then(|t| t.get("initialization"))
                                         .unwrap_or(&"".to_string())
                                         .replace("$RepresentationID$", &rep.id);
-                                    rep.media = adapt.segment_template
+                                    rep.media = adapt
+                                        .segment_template
                                         .as_ref()
                                         .and_then(|t| t.get("media"))
                                         .unwrap_or(&"".to_string())
                                         .replace("$RepresentationID$", &rep.id);
-                                    rep.segment_duration = adapt.segment_template
+                                    rep.segment_duration = adapt
+                                        .segment_template
                                         .as_ref()
                                         .and_then(|t| t.get("duration"))
                                         .and_then(|d| d.parse::<f64>().ok())
                                         .unwrap_or(1.0);
-                                    rep.timescale = adapt.segment_template
+                                    rep.timescale = adapt
+                                        .segment_template
                                         .as_ref()
                                         .and_then(|t| t.get("timescale"))
                                         .and_then(|ts| ts.parse::<u64>().ok())
@@ -286,7 +273,8 @@ pub fn parse_mpd(xml: &str) -> Result<MpdMetadata, Box<dyn std::error::Error + S
 
 fn parse_duration(value: &str, fallback_seconds: f64) -> Option<f64> {
     let iso = iso8601_duration::Duration::parse(value).ok()?;
-    let seconds = iso.to_std()
+    let seconds = iso
+        .to_std()
         .or_else(|| Some(std::time::Duration::from_secs_f64(fallback_seconds)))
         .map(|d| d.as_secs_f64())?;
     Some(seconds)

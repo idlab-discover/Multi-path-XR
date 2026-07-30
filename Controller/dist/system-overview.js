@@ -12,6 +12,8 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   const MAX_BEAMS = 40; // max simultaneous beams
+  const DEFAULT_SPAWN_BUDGET_PER_FRAME = 2;
+  const DEFAULT_SPAWN_BUDGET_BURST = 8;
 
   // Compute a quadratic curve path between two points with optional curvature
   // curvature in [-1..+1], positive bends “up” (perpendicular to the straight line)
@@ -77,6 +79,39 @@
       this.animRunning = false;
       this.maxFps = clamp(cfg.maxFps ?? 15, 1, 60);
       this._frameInterval = 1000 / this.maxFps;
+      this.pauseWhenHidden = cfg.pauseWhenHidden !== false;
+      this.pauseWhenBlurred = cfg.pauseWhenBlurred === true;
+      this.spawnBudgetPerFrame = clamp(cfg.spawnBudgetPerFrame ?? DEFAULT_SPAWN_BUDGET_PER_FRAME, 1, MAX_BEAMS);
+      this.spawnBudgetBurst = clamp(cfg.spawnBudgetBurst ?? DEFAULT_SPAWN_BUDGET_BURST, this.spawnBudgetPerFrame, MAX_BEAMS);
+      this.spawnBudget = this.spawnBudgetBurst;
+      this.isDocumentVisible = typeof document === 'undefined' ? true : !document.hidden;
+      this.hasWindowFocus = typeof document !== 'undefined' && typeof document.hasFocus === 'function'
+        ? document.hasFocus()
+        : true;
+
+      this._handleVisibilityChange = () => {
+        this.isDocumentVisible = !document.hidden;
+        if (this._isAnimationActive() && this.beams.size > 0) {
+          this.ensureAnim();
+        }
+      };
+      this._handleWindowFocus = () => {
+        this.hasWindowFocus = true;
+        if (this._isAnimationActive() && this.beams.size > 0) {
+          this.ensureAnim();
+        }
+      };
+      this._handleWindowBlur = () => {
+        this.hasWindowFocus = false;
+      };
+
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', this._handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.addEventListener('focus', this._handleWindowFocus);
+        window.addEventListener('blur', this._handleWindowBlur);
+      }
 
       // install & draw initial
       this.install();
@@ -100,6 +135,7 @@
     addBeam(opts) {
       // Validate
       if (!opts || !opts.edge) return null;
+      if (!this._canSpawnBeam()) return null;
 
       // opts: { id, edge, dir(+1|-1), speed(px/s)=240, length(px)=100, gradient:[from,to], tag?, hops? }
       const e = this.edges.get(opts.edge);
@@ -188,6 +224,7 @@
       });
 
       this.beams.set(id, beam);
+      this.spawnBudget = Math.max(0, this.spawnBudget - 1);
       //console.log('added beam', beam);
       this.ensureAnim();
       return id;
@@ -340,6 +377,11 @@
       this._last = performance.now();
       const loop = (t) => {
         if (!this.animRunning) return;
+        if (!this._isAnimationActive()) {
+          this._last = t;
+          requestAnimationFrame(loop);
+          return;
+        }
         const elapsed = t - this._last; // ms since last step
         // Only step when we've reached the capped frame interval (<= 30 fps)
         if (elapsed >= this._frameInterval) {
@@ -359,6 +401,8 @@
         this.animRunning = false;
         return;
       }
+
+      this._replenishSpawnBudget();
 
       const toDelete = [];
       this.beams.forEach((bm) => {
@@ -403,7 +447,7 @@
           if (action === 'bounce') {
             // reverse and nudge just inside so we don't immediately retrigger
             bm.dir *= -1;
-            const nudge = Math.max(1, Math.min(4, bm.segLen * 0.2)); // ~1–4 px
+            const nudge = Math.max(1, Math.min(4, bm.segLen * 0.2)); // ~1-4 px
             bm.offset = bm.dir > 0 ? nudge : (bm.total - nudge);
             bm.hopsLeft--;
             return;
@@ -411,8 +455,6 @@
 
           // Prevent multi-spawn loops if the same frame hits again
           if (!bm.spawnedNext) {
-            bm.spawnedNext = true;
-
             // who did we come from (as node id)?
             const incomingNode =
               (edge.from === nodeId) ? edge.to :
@@ -436,6 +478,17 @@
                 .map(n => this._edgeIdBetween(nodeId, n)).filter(Boolean);
             }
 
+            if (outEdges.length === 0) {
+              bm.spawnedNext = true;
+              bm.state = 'finishing';
+              return;
+            }
+
+            if (!this._canSpawnBeam(outEdges.length)) {
+              this._holdBeamAtNode(bm);
+              return;
+            }
+
             // Spawn children with visual continuity.
             outEdges.forEach((eid, idx) => {
               const e2 = this.edges.get(eid);
@@ -443,11 +496,19 @@
               const total2 = e2.el.getTotalLength();
               const dir2 = (e2.from === nodeId) ? +1 : -1;
 
+              let speed = bm.speed;
+              // A small hard coded variation on unicast traffic in case of splits
+              if (bm.tag === 'unicast' && outEdges.length > 1) {
+                // 15% random variation
+                const variation = (Math.random() * 0.3) - 0.15;
+                speed = Math.round(bm.speed * (1 + variation));
+              }
+
               this.addBeam({
                 id: `${bm.id}_${idx}_${Date.now().toString(36).slice(5)}`,
                 edge: eid,
                 dir: dir2,
-                speed: bm.speed,
+                speed: speed,
                 length: bm.segLen,
                 gradient: this._gradientFromBeam(bm),
                 tag: bm.tag,
@@ -455,6 +516,8 @@
                 widthFactor: bm.widthFactor,
               });
             });
+
+            bm.spawnedNext = true;
           }
           // Now linger the parent so it visually "finishes into" the node
           bm.state = 'finishing';
@@ -471,6 +534,38 @@
       bm.path.remove();
       bm.grad.remove();
       this.beams.delete(id);
+    }
+
+    _isAnimationActive() {
+      if (this.pauseWhenHidden && !this.isDocumentVisible) {
+        return false;
+      }
+      if (this.pauseWhenBlurred && !this.hasWindowFocus) {
+        return false;
+      }
+      return true;
+    }
+
+    _replenishSpawnBudget() {
+      this.spawnBudget = Math.min(this.spawnBudgetBurst, this.spawnBudget + this.spawnBudgetPerFrame);
+    }
+
+    _holdBeamAtNode(bm) {
+      bm.offset = bm.dir > 0 ? (bm.total - bm.length) : 0;
+      bm.path.style.strokeDashoffset = String(-bm.offset);
+    }
+
+    _canSpawnBeam(required = 1) {
+      if (!this._isAnimationActive()) {
+        return false;
+      }
+      if (this.spawnBudget < required) {
+        return false;
+      }
+      if ((this.beams.size + required) > MAX_BEAMS) {
+        return false;
+      }
+      return true;
     }
 
     _policy(nodeId, beam, incomingEdgeId) {

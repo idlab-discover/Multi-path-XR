@@ -46,8 +46,9 @@ class Intf( object ):
         self.node = node
         self.name = name
         self.link = link
-        self.mac = mac
-        self.ip, self.prefixLen = None, None
+        self.mac: str | None = mac
+        self.ip: str | None = None
+        self.prefixLen: int | None = None
 
         # if interface is lo, we know the ip is 127.0.0.1.
         # This saves an ifconfig command per node
@@ -128,15 +129,15 @@ class Intf( object ):
         self.mac = macs[ 0 ] if macs else None
         return self.ip, self.mac
 
-    def IP( self ):
+    def IP( self ) -> str | None:
         "Return IP address"
         return self.ip
 
-    def MAC( self ):
+    def MAC( self ) -> str | None:
         "Return MAC address"
         return self.mac
 
-    def isUp( self, setUp=False ):
+    def isUp( self, setUp=False ) -> bool:
         "Return whether interface is up"
         if setUp:
             cmdOutput = self.ifconfig( 'up' )
@@ -481,13 +482,13 @@ class Link( object ):
             self.makeIntfPair( intfName1, intfName2, addr1, addr2 )
 
         if not cls1:
-            cls1 = intf
+            cls1: type[Intf] = intf
         if not cls2:
-            cls2 = intf
+            cls2: type[Intf] = intf
 
-        intf1 = cls1( name=intfName1, node=node1,
+        intf1: Intf = cls1( name=intfName1, node=node1,
                       link=self, mac=addr1, **params1  )
-        intf2 = cls2( name=intfName2, node=node2,
+        intf2: Intf = cls2( name=intfName2, node=node2,
                       link=self, mac=addr2, **params2 )
 
         # All we are is dust in the wind, and our two interfaces

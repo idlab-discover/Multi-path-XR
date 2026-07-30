@@ -10,10 +10,11 @@ use super::generic::Mp4Box;
 // - `base_decode_time`: A 64-bit unsigned integer representing the timeline position of the first sample in timescale units.
 //   This value is expressed in the timescale of the movie and provides the decode time for the first sample in the fragment.
 #[derive(Default, Clone)]
-pub struct TfdtBox { // Track Fragment Decode Time Box
-    pub version: u8,             // 0 = 32-bit, 1 = 64-bit
-    pub flags: u32,              // 24-bit flags
-    pub base_decode_time: u64,  // Timeline position in timescale units
+pub struct TfdtBox {
+    // Track Fragment Decode Time Box
+    pub version: u8,           // 0 = 32-bit, 1 = 64-bit
+    pub flags: u32,            // 24-bit flags
+    pub base_decode_time: u64, // Timeline position in timescale units
 }
 
 impl std::fmt::Debug for TfdtBox {
@@ -32,7 +33,9 @@ impl std::fmt::Debug for TfdtBox {
 impl Mp4Box for TfdtBox {
     // Returns the box type as a 4-byte array. For `TfdtBox`, the type is "tfdt".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"tfdt" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"tfdt"
+    }
 
     // Calculates the size of the `TfdtBox` in bytes.
     // The size includes:
@@ -52,7 +55,7 @@ impl Mp4Box for TfdtBox {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // flags (24-bit)
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // flags (24-bit)
 
         if self.version == 1 {
             buffer.extend_from_slice(&self.base_decode_time.to_be_bytes());
@@ -62,7 +65,7 @@ impl Mp4Box for TfdtBox {
             panic!("Unsupported TFDT version: {}", self.version);
         }
     }
-    
+
     fn read_box(data: &[u8]) -> Result<(Self, usize), String> {
         let size = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;
         if data.len() < size {
@@ -86,8 +89,12 @@ impl Mp4Box for TfdtBox {
         };
 
         Ok((
-            TfdtBox { version, flags, base_decode_time },
-            size
+            TfdtBox {
+                version,
+                flags,
+                base_decode_time,
+            },
+            size,
         ))
     }
 }

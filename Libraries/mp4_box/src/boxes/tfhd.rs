@@ -11,10 +11,11 @@ use super::generic::Mp4Box;
 // - `flags`: A 32-bit unsigned integer containing optional flags that specify additional properties of the track fragment.
 //   The flags field is designed to allow for future expansion and customization.
 #[derive(Clone)]
-pub struct TfhdBox { // Track Fragment Header Box
-    pub version: u8,       // Version (always 0)
-    pub flags: u32,        // 24-bit flags
-    pub track_id: u32,     // Track ID
+pub struct TfhdBox {
+    // Track Fragment Header Box
+    pub version: u8,   // Version (always 0)
+    pub flags: u32,    // 24-bit flags
+    pub track_id: u32, // Track ID
 
     // Optional fields based on flags
     pub base_data_offset: Option<u64>,
@@ -60,12 +61,13 @@ impl std::fmt::Debug for TfhdBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `TfhdBox` struct.
 impl Mp4Box for TfhdBox {
     // Returns the box type as a 4-byte array. For `TfhdBox`, the type is "tfhd".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"tfhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"tfhd"
+    }
 
     // Calculates the size of the `TfhdBox` in bytes.
     // The size includes:
@@ -75,11 +77,21 @@ impl Mp4Box for TfhdBox {
     #[inline(always)]
     fn box_size(&self) -> u32 {
         let mut size = 8 + 4 + 4; // header + version/flags + track_id
-        if self.flags & 0x000001 != 0 { size += 8; }  // base_data_offset
-        if self.flags & 0x000002 != 0 { size += 4; }  // sample_description_index
-        if self.flags & 0x000008 != 0 { size += 4; }  // default_sample_duration
-        if self.flags & 0x000010 != 0 { size += 4; }  // default_sample_size
-        if self.flags & 0x000020 != 0 { size += 4; }  // default_sample_flags
+        if self.flags & 0x000001 != 0 {
+            size += 8;
+        } // base_data_offset
+        if self.flags & 0x000002 != 0 {
+            size += 4;
+        } // sample_description_index
+        if self.flags & 0x000008 != 0 {
+            size += 4;
+        } // default_sample_duration
+        if self.flags & 0x000010 != 0 {
+            size += 4;
+        } // default_sample_size
+        if self.flags & 0x000020 != 0 {
+            size += 4;
+        } // default_sample_flags
         size
     }
 
@@ -123,38 +135,48 @@ impl Mp4Box for TfhdBox {
         let flags = u32::from_be_bytes([0, data[9], data[10], data[11]]);
         let mut offset = 12;
 
-        let track_id = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+        let track_id = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
         offset += 4;
 
         let base_data_offset = if flags & 0x000001 != 0 {
-            let val = u64::from_be_bytes(data[offset..offset+8].try_into().unwrap());
+            let val = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
             offset += 8;
             Some(val)
-        } else { None };
+        } else {
+            None
+        };
 
         let sample_description_index = if flags & 0x000002 != 0 {
-            let val = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let val = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
             Some(val)
-        } else { None };
+        } else {
+            None
+        };
 
         let default_sample_duration = if flags & 0x000008 != 0 {
-            let val = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let val = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
             Some(val)
-        } else { None };
+        } else {
+            None
+        };
 
         let default_sample_size = if flags & 0x000010 != 0 {
-            let val = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let val = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             offset += 4;
             Some(val)
-        } else { None };
+        } else {
+            None
+        };
 
         let default_sample_flags = if flags & 0x000020 != 0 {
-            let val = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+            let val = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
             //offset += 4;
             Some(val)
-        } else { None };
+        } else {
+            None
+        };
 
         Ok((
             TfhdBox {
@@ -167,7 +189,7 @@ impl Mp4Box for TfhdBox {
                 default_sample_size,
                 default_sample_flags,
             },
-            size
+            size,
         ))
     }
 }

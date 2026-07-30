@@ -14,8 +14,9 @@ use super::{generic::Mp4Box, tfdt::TfdtBox, tfhd::TfhdBox, trun::TrunBox};
 // - `tfdt`: An instance of `TfdtBox` representing the track fragment decode time.
 // - `trun`: An instance of `TrunBox` representing the track run.
 #[derive(Default, Clone)]
-pub struct TrafBox { // Track Fragment Box
-    pub tfhd: TfhdBox, // Track Fragment Header Box
+pub struct TrafBox {
+    // Track Fragment Box
+    pub tfhd: TfhdBox,         // Track Fragment Header Box
     pub tfdt: Option<TfdtBox>, // Optional Track Fragment Decode Time Box
     pub trun: Option<TrunBox>, // Optional Track Run Box
 }
@@ -32,12 +33,13 @@ impl std::fmt::Debug for TrafBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `TrafBox` struct.
 impl Mp4Box for TrafBox {
     // Returns the box type as a 4-byte array. For `TrafBox`, the type is "traf".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"traf" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"traf"
+    }
 
     // Calculates the size of the `TrafBox` in bytes.
     // The size includes:
@@ -72,7 +74,11 @@ impl Mp4Box for TrafBox {
         let tfhd_size = self.tfhd.box_size() as usize;
         self.tfhd.write_box(buffer);
         if buffer.len() != current_size + tfhd_size {
-            panic!("Error writing TfhdBox: expected size {}, got {}", tfhd_size, buffer.len() - current_size);
+            panic!(
+                "Error writing TfhdBox: expected size {}, got {}",
+                tfhd_size,
+                buffer.len() - current_size
+            );
         }
 
         if let Some(ref tfdt) = self.tfdt {
@@ -80,7 +86,11 @@ impl Mp4Box for TrafBox {
             let tfdt_size = tfdt.box_size() as usize;
             tfdt.write_box(buffer);
             if buffer.len() != current_size + tfdt_size {
-                panic!("Error writing TfdtBox: expected size {}, got {}", tfdt_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing TfdtBox: expected size {}, got {}",
+                    tfdt_size,
+                    buffer.len() - current_size
+                );
             }
         }
 
@@ -89,7 +99,11 @@ impl Mp4Box for TrafBox {
             let trun_size = trun.box_size() as usize;
             trun.write_box(buffer);
             if buffer.len() != current_size + trun_size {
-                panic!("Error writing TrunBox: expected size {}, got {}", trun_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing TrunBox: expected size {}, got {}",
+                    trun_size,
+                    buffer.len() - current_size
+                );
             }
         }
     }
@@ -109,8 +123,9 @@ impl Mp4Box for TrafBox {
         let mut trun = None;
 
         while offset + 8 <= size {
-            let sub_size = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
-            let sub_type = &data[offset+4..offset+8];
+            let sub_size =
+                u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+            let sub_type = &data[offset + 4..offset + 8];
 
             if offset + sub_size > size || sub_size < 8 {
                 return Err("Invalid sub-box size inside TRAF".into());
@@ -121,7 +136,8 @@ impl Mp4Box for TrafBox {
                     if tfhd.is_some() {
                         return Err("Duplicate TFHD box inside TRAF".into());
                     }
-                    let (parsed, parsed_size) = TfhdBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        TfhdBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect TFHD box size".into());
                     }
@@ -131,7 +147,8 @@ impl Mp4Box for TrafBox {
                     if tfdt.is_some() {
                         return Err("Duplicate TFDT box inside TRAF".into());
                     }
-                    let (parsed, parsed_size) = TfdtBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        TfdtBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect TFDT box size".into());
                     }
@@ -141,7 +158,8 @@ impl Mp4Box for TrafBox {
                     if trun.is_some() {
                         return Err("Duplicate TRUN box inside TRAF".into());
                     }
-                    let (parsed, parsed_size) = TrunBox::read_box(&data[offset..offset+sub_size])?;
+                    let (parsed, parsed_size) =
+                        TrunBox::read_box(&data[offset..offset + sub_size])?;
                     if parsed_size != sub_size {
                         return Err("Incorrect TRUN box size".into());
                     }
@@ -165,7 +183,7 @@ impl Mp4Box for TrafBox {
                 tfdt,
                 trun,
             },
-            size
+            size,
         ))
     }
 }

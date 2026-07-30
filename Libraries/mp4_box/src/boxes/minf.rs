@@ -13,18 +13,19 @@ use super::{dinf::DinfBox, generic::Mp4Box, smhd::SmhdBox, stbl::StblBox, vmhd::
 // - `dinf`: An instance of `DinfBox` representing the data information.
 // - `stbl`: An instance of `StblBox` representing the sample table.
 #[derive(Default, Clone)]
-pub struct MinfBox { // Media Information Box
-    pub vmhd: Option<VmhdBox>,  // Video Media Header Box (optional)
-    pub smhd: Option<SmhdBox>,  // Sound Media Header Box (optional)
-    pub dinf: DinfBox, // Data Information Box
-    pub stbl: StblBox, // Sample Table Box
+pub struct MinfBox {
+    // Media Information Box
+    pub vmhd: Option<VmhdBox>, // Video Media Header Box (optional)
+    pub smhd: Option<SmhdBox>, // Sound Media Header Box (optional)
+    pub dinf: DinfBox,         // Data Information Box
+    pub stbl: StblBox,         // Sample Table Box
 }
 
 impl std::fmt::Debug for MinfBox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut dbg = f.debug_struct("MinfBox");
         dbg.field("box_size", &self.box_size())
-           .field("box_type", &format_fourcc(&self.box_type()));
+            .field("box_type", &format_fourcc(&self.box_type()));
         if let Some(vmhd) = &self.vmhd {
             dbg.field("vmhd", vmhd);
         }
@@ -32,8 +33,8 @@ impl std::fmt::Debug for MinfBox {
             dbg.field("smhd", smhd);
         }
         dbg.field("dinf", &self.dinf)
-           .field("stbl", &self.stbl)
-           .finish()
+            .field("stbl", &self.stbl)
+            .finish()
     }
 }
 
@@ -41,7 +42,9 @@ impl std::fmt::Debug for MinfBox {
 impl Mp4Box for MinfBox {
     // Returns the box type as a 4-byte array. For `MinfBox`, the type is "minf".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"minf" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"minf"
+    }
 
     // Calculates the size of the `MinfBox` in bytes.
     // The size includes:
@@ -51,11 +54,10 @@ impl Mp4Box for MinfBox {
     // - The size of the `StblBox`.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 
-        self.vmhd.as_ref().map_or(0, |b| b.box_size()) +
-        self.smhd.as_ref().map_or(0, |b| b.box_size()) +
-        self.dinf.box_size() +
-        self.stbl.box_size()
+        8 + self.vmhd.as_ref().map_or(0, |b| b.box_size())
+            + self.smhd.as_ref().map_or(0, |b| b.box_size())
+            + self.dinf.box_size()
+            + self.stbl.box_size()
     }
 
     // Writes the `MinfBox` to the provided buffer.
@@ -73,7 +75,11 @@ impl Mp4Box for MinfBox {
             let vmhd_size = vmhd.box_size() as usize;
             vmhd.write_box(buffer);
             if buffer.len() != current_size + vmhd_size {
-                panic!("Error writing VmhdBox: expected size {}, got {}", vmhd_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing VmhdBox: expected size {}, got {}",
+                    vmhd_size,
+                    buffer.len() - current_size
+                );
             }
         }
         if let Some(smhd) = &self.smhd {
@@ -81,7 +87,11 @@ impl Mp4Box for MinfBox {
             let smhd_size = smhd.box_size() as usize;
             smhd.write_box(buffer);
             if buffer.len() != current_size + smhd_size {
-                panic!("Error writing SmhdBox: expected size {}, got {}", smhd_size, buffer.len() - current_size);
+                panic!(
+                    "Error writing SmhdBox: expected size {}, got {}",
+                    smhd_size,
+                    buffer.len() - current_size
+                );
             }
         }
         // Write the contents of the `DinfBox`.
@@ -89,14 +99,22 @@ impl Mp4Box for MinfBox {
         let dinf_size = self.dinf.box_size() as usize;
         self.dinf.write_box(buffer);
         if buffer.len() != current_size + dinf_size {
-            panic!("Error writing DinfBox: expected size {}, got {}", dinf_size, buffer.len() - current_size);
+            panic!(
+                "Error writing DinfBox: expected size {}, got {}",
+                dinf_size,
+                buffer.len() - current_size
+            );
         }
         // Write the contents of the `StblBox`.
         let current_size = buffer.len();
         let stbl_size = self.stbl.box_size() as usize;
         self.stbl.write_box(buffer);
         if buffer.len() != current_size + stbl_size {
-            panic!("Error writing StblBox: expected size {}, got {}", stbl_size, buffer.len() - current_size);
+            panic!(
+                "Error writing StblBox: expected size {}, got {}",
+                stbl_size,
+                buffer.len() - current_size
+            );
         }
     }
 
@@ -116,7 +134,7 @@ impl Mp4Box for MinfBox {
         let mut stbl = None;
 
         while offset < size {
-            let box_type = &data[offset+4..offset+8];
+            let box_type = &data[offset + 4..offset + 8];
             // let sub_box_size = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap()) as usize;
 
             match box_type {
@@ -157,7 +175,7 @@ impl Mp4Box for MinfBox {
                 dinf: dinf.unwrap(),
                 stbl: stbl.unwrap(),
             },
-            size
+            size,
         ))
     }
 }

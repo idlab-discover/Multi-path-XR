@@ -18,10 +18,11 @@ use super::generic::Mp4Box;
 // The `StszBox` is essential for enabling efficient access to media samples, as it provides the size of each sample,
 // which is required to locate and decode the samples in the media data.
 #[derive(Clone)]
-pub struct StszBox { // Sample Size Box
+pub struct StszBox {
+    // Sample Size Box
     pub version: u8,
     pub flags: u32,
-    pub sample_size: u32, // Default sample size
+    pub sample_size: u32,      // Default sample size
     pub entry_sizes: Vec<u32>, // List of sample sizes
 }
 
@@ -33,9 +34,7 @@ impl Default for StszBox {
             version: 0,
             flags: 0,
             sample_size: 0,
-            entry_sizes: vec![
-                0,
-            ],
+            entry_sizes: vec![0],
         }
     }
 }
@@ -57,7 +56,9 @@ impl std::fmt::Debug for StszBox {
 impl Mp4Box for StszBox {
     // Returns the box type as a 4-byte array. For `StszBox`, the type is "stsz".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"stsz" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"stsz"
+    }
 
     // Calculates the size of the `StszBox` in bytes.
     // The size is fixed at 20 bytes, which includes:
@@ -83,7 +84,7 @@ impl Mp4Box for StszBox {
         buffer.extend_from_slice(&self.box_size().to_be_bytes());
         buffer.extend_from_slice(&self.box_type());
         buffer.push(self.version);
-        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]);  // flags (24 bits)
+        buffer.extend_from_slice(&self.flags.to_be_bytes()[1..4]); // flags (24 bits)
         buffer.extend_from_slice(&self.sample_size.to_be_bytes());
         if self.sample_size == 0 {
             buffer.extend_from_slice(&(self.entry_sizes.len() as u32).to_be_bytes());
@@ -91,7 +92,7 @@ impl Mp4Box for StszBox {
                 buffer.extend_from_slice(&entry.to_be_bytes());
             }
         } else {
-            buffer.extend_from_slice(&(0u32).to_be_bytes());  // sample_count = 0 when default sample_size > 0
+            buffer.extend_from_slice(&(0u32).to_be_bytes()); // sample_count = 0 when default sample_size > 0
         }
     }
 
@@ -111,17 +112,25 @@ impl Mp4Box for StszBox {
 
         let sample_size = u32::from_be_bytes(data[12..16].try_into().unwrap());
         let sample_count = u32::from_be_bytes(data[16..20].try_into().unwrap());
-    
+
         let mut entry_sizes = Vec::new();
         if sample_size == 0 {
             let mut offset = 20;
             for _ in 0..sample_count {
-                let entry = u32::from_be_bytes(data[offset..offset+4].try_into().unwrap());
+                let entry = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
                 entry_sizes.push(entry);
                 offset += 4;
             }
         }
-    
-        Ok((StszBox { sample_size, entry_sizes, version, flags }, size))
+
+        Ok((
+            StszBox {
+                sample_size,
+                entry_sizes,
+                version,
+                flags,
+            },
+            size,
+        ))
     }
 }

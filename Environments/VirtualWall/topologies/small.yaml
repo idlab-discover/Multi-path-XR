@@ -1,0 +1,35 @@
+port_id_scheme: { prefix: "if", start_index: 0 }
+max_experiment_nics_per_node: 4
+resource_prefix: "vw-"
+
+fabrics:
+  - name: "A"
+    order: 1
+    network_id: "A"
+    ipv4_subnet: "192.168.10.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+  - name: "B"
+    order: 2
+    network_id: "B"
+    ipv4_subnet: "192.168.11.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+roles:
+  - name: "server"
+    fabrics: ["A", "B"]
+  - name: "core"
+    fabrics: ["A", "B"]
+  - name: "edge"
+    fabrics: ["B"]
+
+nodes:
+  - name: "origin1"
+    role: "server"
+  - name: "core1"
+    role: "core"
+  - name: "edge1"
+    role: "edge"

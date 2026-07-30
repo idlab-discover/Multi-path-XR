@@ -1,0 +1,281 @@
+port_id_scheme: { prefix: "if", start_index: 0 }
+max_experiment_nics_per_node: 4   # CTRL is implicit, so 4 experiment NICs max
+resource_prefix: "vw-"
+
+############################################################
+# FABRICS (VLAN-backed, disjoint L2 domains)
+############################################################
+
+fabrics:
+
+  ##########################################################
+  # SERVER ↔ CORES (WAN multipath)
+  ##########################################################
+
+  - name: "A"
+    order: 1
+    network_id: "A"
+    ipv4_subnet: "192.168.10.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "B"
+    order: 2
+    network_id: "B"
+    ipv4_subnet: "192.168.11.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  ##########################################################
+  # CORE ↔ REGIONAL (per-core unicast + multicast)
+  ##########################################################
+
+  - name: "C_A"
+    order: 10
+    network_id: "C_A"
+    ipv4_subnet: "192.168.20.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "D_A"
+    order: 11
+    network_id: "D_A"
+    ipv4_subnet: "192.168.21.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "C_B"
+    order: 12
+    network_id: "C_B"
+    ipv4_subnet: "192.168.22.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "D_B"
+    order: 13
+    network_id: "D_B"
+    ipv4_subnet: "192.168.23.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "C_C"
+    order: 14
+    network_id: "C_C"
+    ipv4_subnet: "192.168.24.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "D_C"
+    order: 15
+    network_id: "D_C"
+    ipv4_subnet: "192.168.25.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  ##########################################################
+  # REGIONAL ↔ EDGE (per-regional unicast + multicast)
+  ##########################################################
+
+  - name: "E_A1"
+    order: 20
+    network_id: "E_A1"
+    ipv4_subnet: "192.168.30.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_A1"
+    order: 21
+    network_id: "F_A1"
+    ipv4_subnet: "192.168.31.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "E_A2"
+    order: 22
+    network_id: "E_A2"
+    ipv4_subnet: "192.168.32.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_A2"
+    order: 23
+    network_id: "F_A2"
+    ipv4_subnet: "192.168.33.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "E_B1"
+    order: 24
+    network_id: "E_B1"
+    ipv4_subnet: "192.168.34.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_B1"
+    order: 25
+    network_id: "F_B1"
+    ipv4_subnet: "192.168.35.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "E_B2"
+    order: 26
+    network_id: "E_B2"
+    ipv4_subnet: "192.168.36.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_B2"
+    order: 27
+    network_id: "F_B2"
+    ipv4_subnet: "192.168.37.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "E_C1"
+    order: 28
+    network_id: "E_C1"
+    ipv4_subnet: "192.168.38.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_C1"
+    order: 29
+    network_id: "F_C1"
+    ipv4_subnet: "192.168.39.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "E_C2"
+    order: 30
+    network_id: "E_C2"
+    ipv4_subnet: "192.168.40.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+  - name: "F_C2"
+    order: 31
+    network_id: "F_C2"
+    ipv4_subnet: "192.168.41.0/24"
+    host_start: 10
+    impairment:
+      - { latency_ms: 0, packet_loss: 0.0, capacity_kbit_per_s: 1000000 }
+
+############################################################
+# ROLES (Selective fabric attachment)
+############################################################
+
+roles:
+
+  - name: "server"
+    fabrics: ["A", "B"]
+
+  - name: "core_A"
+    fabrics: ["A", "B", "C_A", "D_A"]
+
+  - name: "core_B"
+    fabrics: ["A", "B", "C_B", "D_B"]
+
+  - name: "core_C"
+    fabrics: ["A", "B", "C_C", "D_C"]
+
+  - name: "regional_A1"
+    fabrics: ["C_A", "D_A", "E_A1", "F_A1"]
+
+  - name: "regional_A2"
+    fabrics: ["C_A", "D_A", "E_A2", "F_A2"]
+
+  - name: "regional_B1"
+    fabrics: ["C_B", "D_B", "E_B1", "F_B1"]
+
+  - name: "regional_B2"
+    fabrics: ["C_B", "D_B", "E_B2", "F_B2"]
+
+  - name: "regional_C1"
+    fabrics: ["C_C", "D_C", "E_C1", "F_C1"]
+
+  - name: "regional_C2"
+    fabrics: ["C_C", "D_C", "E_C2", "F_C2"]
+
+  - name: "edge_A1"
+    fabrics: ["E_A1", "F_A1"]
+
+  - name: "edge_A2"
+    fabrics: ["E_A2", "F_A2"]
+
+  - name: "edge_B1"
+    fabrics: ["E_B1", "F_B1"]
+
+  - name: "edge_B2"
+    fabrics: ["E_B2", "F_B2"]
+
+  - name: "edge_C1"
+    fabrics: ["E_C1", "F_C1"]
+
+  - name: "edge_C2"
+    fabrics: ["E_C2", "F_C2"]
+
+############################################################
+# NODES (22 total)
+############################################################
+
+nodes:
+
+  # Origin
+  - name: "origin1"
+    role: "server"
+
+  # Cores
+  - name: "coreA"
+    role: "core_A"
+  - name: "coreB"
+    role: "core_B"
+  - name: "coreC"
+    role: "core_C"
+
+  # Regionals
+  - name: "regionalA1"
+    role: "regional_A1"
+  - name: "regionalA2"
+    role: "regional_A2"
+  - name: "regionalB1"
+    role: "regional_B1"
+  - name: "regionalB2"
+    role: "regional_B2"
+  - name: "regionalC1"
+    role: "regional_C1"
+  - name: "regionalC2"
+    role: "regional_C2"
+
+  # Edges (also run receivers)
+  - name: "edgeA1"
+    role: "edge_A1"
+  - name: "edgeA2"
+    role: "edge_A2"
+  - name: "edgeB1"
+    role: "edge_B1"
+  - name: "edgeB2"
+    role: "edge_B2"
+  - name: "edgeC1"
+    role: "edge_C1"
+  - name: "edgeC2"
+    role: "edge_C2"

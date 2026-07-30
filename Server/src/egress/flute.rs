@@ -1,27 +1,86 @@
 // egress/flute.rs
 
 use std::{
-    net::UdpSocket, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, thread, time::{Duration, Instant, SystemTime, UNIX_EPOCH}
+    net::UdpSocket,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
-    encoders::EncodingFormat,
-    processing::aggregator::PointCloudAggregator,
-    processing::ProcessingPipeline,
+    processing::aggregator::SpatialFrameAggregator, processing::ProcessingPipeline,
     services::stream_manager::StreamManager,
 };
 
-use shared_utils::types::{FrameTaskData, PointCloudData};
+use shared_utils::types::{FramePayloadMetadata, FrameTaskData, SpatialFrameData};
+use spatial_codecs::encoder::EncodingFormat;
 
 use circular_buffer::CircularBuffer;
 use flute::{
-    core::{lct::{Cenc, LCTHeader}, Oti, UDPEndpoint},
+    core::{
+        lct::{Cenc, LCTHeader},
+        Oti, UDPEndpoint,
+    },
     sender::{Config, ObjectDesc, Sender},
 };
-use tracing::{info, debug, error, instrument};
 use shared_networking::udp::{build_multicast_sender, UdpTxOpts};
+use tracing::{debug, error, info, instrument};
 
-use super::egress_common::{push_preencoded_frame_data, EgressCommonMetrics, EgressProtocol};
+use super::egress_common::{
+    frame_task_to_pcf_wire, push_preencoded_frame_data, AtomicEncodingFormat, EgressCommonMetrics,
+    EgressProtocol,
+};
+
+const FLUTE_CLOCK_OBJECT_INTERVAL: Duration = Duration::from_millis(250);
+
+fn current_time_us() -> Option<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_micros().min(u128::from(u64::MAX)) as u64)
+}
+
+#[derive(Debug)]
+struct AtomicCenc {
+    inner: AtomicU8,
+}
+
+impl AtomicCenc {
+    fn new(cenc: Cenc) -> Self {
+        Self {
+            inner: AtomicU8::new(Self::encode(cenc)),
+        }
+    }
+
+    #[inline]
+    fn load(&self) -> Cenc {
+        Self::decode(self.inner.load(Ordering::Relaxed))
+    }
+
+    #[inline]
+    fn store(&self, cenc: Cenc) {
+        self.inner.store(Self::encode(cenc), Ordering::Relaxed);
+    }
+
+    #[inline]
+    const fn encode(cenc: Cenc) -> u8 {
+        cenc as u8
+    }
+
+    #[inline]
+    const fn decode(raw: u8) -> Cenc {
+        match raw {
+            0 => Cenc::Null,
+            1 => Cenc::Zlib,
+            2 => Cenc::Deflate,
+            3 => Cenc::Gzip,
+            _ => Cenc::Null,
+        }
+    }
+}
 
 /// FLUTE Egress module responsible for sending frames over FLUTE protocol.
 #[derive(Clone, Debug)]
@@ -29,21 +88,24 @@ pub struct FluteEgress {
     processing_pipeline: Arc<ProcessingPipeline>,
     frame_buffer: Arc<Mutex<CircularBuffer<10, FrameTaskData>>>,
     packet_queue: Arc<Mutex<CircularBuffer<20000, Vec<u8>>>>,
-    aggregator: Arc<PointCloudAggregator>,
+    aggregator: Arc<SpatialFrameAggregator>,
     threads_started: Arc<AtomicBool>,
-    fps: Arc<Mutex<u32>>,
-    encoding_format: Arc<Mutex<EncodingFormat>>,
-    max_number_of_points: Arc<Mutex<u64>>,
+    fps: Arc<AtomicU32>,
+    encoding_format: Arc<AtomicEncodingFormat>,
+    max_number_of_primitives: Arc<AtomicU64>,
+    // TODO: check if the mutexes below can also be RwLocks
     endpoint: Arc<Mutex<UDPEndpoint>>,
     sender: Arc<Mutex<Option<Sender>>>,
     udp_socket: Arc<Mutex<Option<UdpSocket>>>,
-    content_encoding: Arc<Mutex<Cenc>>,
+    content_encoding: Arc<AtomicCenc>,
     fec: Arc<Mutex<String>>,
     fec_parity_percentage: Arc<Mutex<f32>>,
-    bandwidth: Arc<Mutex<u32>>,
+    bandwidth: Arc<AtomicU32>,
     latest_toi: Arc<Mutex<u128>>,
     fdt_id: Arc<Mutex<u32>>,
-    md5: Arc<Mutex<bool>>,
+    md5: Arc<AtomicBool>,
+    last_clock_object_at: Arc<Mutex<Option<Instant>>>,
+    server_instance_id: Arc<String>,
     egress_metrics: Arc<EgressCommonMetrics>,
 }
 
@@ -55,8 +117,9 @@ impl FluteEgress {
         processing_pipeline: Arc<ProcessingPipeline>,
         endpoint_url: String,
         port: u16,
+        server_instance_id: Arc<String>,
     ) {
-        let aggregator = Arc::new(PointCloudAggregator::new(stream_manager.clone()));
+        let aggregator = Arc::new(SpatialFrameAggregator::new(stream_manager.clone()));
 
         let endpoint = UDPEndpoint::new(None, endpoint_url, port);
         let sender = None;
@@ -68,19 +131,21 @@ impl FluteEgress {
             packet_queue: Arc::new(Mutex::new(CircularBuffer::new())),
             aggregator: aggregator.clone(),
             threads_started: Arc::new(AtomicBool::new(false)),
-            fps: Arc::new(Mutex::new(30)),
-            encoding_format: Arc::new(Mutex::new(EncodingFormat::Draco)),
-            max_number_of_points: Arc::new(Mutex::new(100_000)),
+            fps: Arc::new(AtomicU32::new(30)),
+            encoding_format: Arc::new(AtomicEncodingFormat::new(EncodingFormat::Draco)),
+            max_number_of_primitives: Arc::new(AtomicU64::new(100_000)),
             endpoint: Arc::new(Mutex::new(endpoint)),
             sender: Arc::new(Mutex::new(sender)),
             udp_socket: Arc::new(Mutex::new(udp_socket)),
-            content_encoding: Arc::new(Mutex::new(Cenc::Null)),
+            content_encoding: Arc::new(AtomicCenc::new(Cenc::Null)),
             fec: Arc::new(Mutex::new("nocode".to_string())),
             fec_parity_percentage: Arc::new(Mutex::new(0.06)),
-            bandwidth: Arc::new(Mutex::new(200_000_000)), // Default 200 Mbps
-            latest_toi: Arc::new(Mutex::new(1)), // Start from 1
-            fdt_id: Arc::new(Mutex::new(1)), // Start from 1
-            md5: Arc::new(Mutex::new(false)), // By default, MD5 is disabled
+            bandwidth: Arc::new(AtomicU32::new(200_000_000)), // Default 200 Mbps
+            latest_toi: Arc::new(Mutex::new(1)),              // Start from 1
+            fdt_id: Arc::new(Mutex::new(1)),                  // Start from 1
+            md5: Arc::new(AtomicBool::new(false)),            // By default, MD5 is disabled
+            last_clock_object_at: Arc::new(Mutex::new(None)),
+            server_instance_id,
             egress_metrics: Arc::new(EgressCommonMetrics::new()),
         });
 
@@ -97,9 +162,7 @@ impl FluteEgress {
         let mut last_send_instant = Instant::now();
 
         // Read the bandwidth from your Arc<Mutex<u32>> only once every few iterations.
-        let mut bandwidth_bps = {
-            *self.bandwidth.lock().unwrap()
-        };
+        let mut bandwidth_bps = self.bandwidth.load(Ordering::Relaxed);
         let mut iteration_count = 0;
 
         info!("Starting packet_transmitter_loop");
@@ -142,7 +205,7 @@ impl FluteEgress {
             iteration_count += 1;
             if iteration_count >= 100 {
                 iteration_count = 0;
-                bandwidth_bps = *self.bandwidth.lock().unwrap();
+                bandwidth_bps = self.bandwidth.load(Ordering::Relaxed);
             }
 
             // 4) Calculate how long we *want* to wait, based on packet size & bandwidth
@@ -182,14 +245,14 @@ impl FluteEgress {
     /// Sets the content encoding for the egress.
     #[instrument(skip_all)]
     pub fn set_content_encoding(&self, content_encoding: String) {
-        *self.content_encoding.lock().unwrap() = match content_encoding.to_lowercase().as_str() {
+        let content_encoding = match content_encoding.to_lowercase().as_str() {
             "null" => Cenc::Null,
             "zlib" => Cenc::Zlib,
             "deflate" => Cenc::Deflate,
             "gzip" => Cenc::Gzip,
             _ => Cenc::Null,
-            
         };
+        self.content_encoding.store(content_encoding);
     }
 
     #[instrument(skip_all)]
@@ -204,7 +267,7 @@ impl FluteEgress {
 
     #[instrument(skip_all)]
     pub fn set_bandwidth(&self, bandwidth: u32) {
-        *self.bandwidth.lock().unwrap() = bandwidth;
+        self.bandwidth.store(bandwidth, Ordering::Relaxed);
     }
 
     #[instrument(skip_all)]
@@ -222,49 +285,58 @@ impl FluteEgress {
         let fec_encoding_symbol_length = 1400;
         let fec_max_source_block_length = 60;
         // We will round up to the nearest integer
-        let fec_max_parity_symbols = (fec_max_source_block_length as f32 * parity_percentage).ceil() as u16;
+        let fec_max_parity_symbols =
+            (fec_max_source_block_length as f32 * parity_percentage).ceil() as u16;
 
         match fec.to_lowercase().as_str() {
             "raptor" => Oti::new_raptor(
-                fec_encoding_symbol_length, 
-                fec_max_source_block_length, 
-                fec_max_parity_symbols, 
-                1, 
-                4).unwrap(),
+                fec_encoding_symbol_length,
+                fec_max_source_block_length,
+                fec_max_parity_symbols,
+                1,
+                4,
+            )
+            .unwrap(),
             "raptorq" => Oti::new_raptorq(
-                fec_encoding_symbol_length, 
-                fec_max_source_block_length, 
-                fec_max_parity_symbols, 
-                1, 
-                4).unwrap(),
+                fec_encoding_symbol_length,
+                fec_max_source_block_length,
+                fec_max_parity_symbols,
+                1,
+                4,
+            )
+            .unwrap(),
             "reedsolomongf28" => Oti::new_reed_solomon_rs28(
-                fec_encoding_symbol_length, 
-                fec_max_source_block_length.try_into().unwrap(), 
-                fec_max_parity_symbols.try_into().unwrap()).unwrap(),
+                fec_encoding_symbol_length,
+                fec_max_source_block_length.try_into().unwrap(),
+                fec_max_parity_symbols.try_into().unwrap(),
+            )
+            .unwrap(),
             "reedsolomongf28underspecified" => Oti::new_reed_solomon_rs28_under_specified(
-                fec_encoding_symbol_length, 
-                fec_max_source_block_length, 
-                fec_max_parity_symbols).unwrap(),
+                fec_encoding_symbol_length,
+                fec_max_source_block_length,
+                fec_max_parity_symbols,
+            )
+            .unwrap(),
             "nocode" => Oti::new_no_code(1424, 64),
             _ => Oti::new_no_code(1424, 64),
         }
     }
 
-/*    /// Sets the OTI (FEC parameters).
-    pub async fn set_oti(&self, oti: Oti) {
-        // Update the OTI in the sender
-        // Need to reinitialize the sender
-        let mut sender_guard = self.sender.lock().unwrap();
-        if let Some(sender) = sender_guard.as_mut() {
-            sender.update_oti(&oti);
+    /*    /// Sets the OTI (FEC parameters).
+        pub async fn set_oti(&self, oti: Oti) {
+            // Update the OTI in the sender
+            // Need to reinitialize the sender
+            let mut sender_guard = self.sender.lock().unwrap();
+            if let Some(sender) = sender_guard.as_mut() {
+                sender.update_oti(&oti);
+            }
         }
-    }
-*/
+    */
 
     /// Sets the MD5 flag.
     #[instrument(skip_all)]
     pub fn set_md5(&self, md5: bool) {
-        *self.md5.lock().unwrap() = md5;
+        self.md5.store(md5, Ordering::Relaxed);
     }
 
     fn parse_lct_header(data: &[u8]) -> Result<LCTHeader, String> {
@@ -285,12 +357,12 @@ impl FluteEgress {
          *  |                          ...                                  |
          *  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
          */
-    
+
         let len = data.get(2).map_or_else(
             || Err("Fail to read lct header size"),
             |&v| Ok((v as usize) << 2),
         )?;
-    
+
         if len > data.len() {
             return Err(format!(
                 "lct header size is {} whereas pkt size is {}",
@@ -298,11 +370,11 @@ impl FluteEgress {
                 data.len()
             ));
         }
-    
+
         let cp = data[3];
         let flags1 = data[0];
         let flags2 = data[1];
-    
+
         let s = (flags2 >> 7) & 0x1;
         let o = (flags2 >> 5) & 0x3;
         let h = (flags2 >> 4) & 0x1;
@@ -311,21 +383,19 @@ impl FluteEgress {
         let b = flags2 & 0x1;
         let version = flags1 >> 4;
         if version != 1 && version != 2 {
-            return Err(format!(
-                "FLUTE version {version} is not supported"
-            ));
+            return Err(format!("FLUTE version {version} is not supported"));
         }
-    
+
         let cci_len = ((c + 1) as u32) << 2;
         let tsi_len = ((s as u32) << 2) + ((h as u32) << 1);
         let toi_len = ((o as u32) << 2) + ((h as u32) << 1);
-    
+
         let cci_from: usize = 4;
         let cci_to: usize = (4 + cci_len) as usize;
         let tsi_to: usize = cci_to + tsi_len as usize;
         let toi_to: usize = tsi_to + toi_len as usize;
         let header_ext_offset = toi_to as u32;
-    
+
         if toi_to > data.len() || cci_len > 16 || tsi_len > 8 || toi_len > 16 {
             return Err(format!(
                 "toi ends to offset {} whereas pkt size is {}",
@@ -333,23 +403,23 @@ impl FluteEgress {
                 data.len()
             ));
         }
-    
+
         if header_ext_offset > len as u32 {
             return Err("EXT offset outside LCT header".to_owned());
         }
-    
+
         let mut cci: [u8; 16] = [0; 16]; // Store up to 128 bits
         let mut tsi: [u8; 8] = [0; 8]; // Store up to 64 bits
         let mut toi: [u8; 16] = [0; 16]; // Store up to 128 bits
-    
+
         let _ = &cci[(16 - cci_len) as usize..].copy_from_slice(&data[cci_from..cci_to]);
         let _ = &tsi[(8 - tsi_len) as usize..].copy_from_slice(&data[cci_to..tsi_to]);
         let _ = &toi[(16 - toi_len) as usize..].copy_from_slice(&data[tsi_to..toi_to]);
-    
+
         let cci = u128::from_be_bytes(cci);
         let tsi = u64::from_be_bytes(tsi);
         let toi = u128::from_be_bytes(toi);
-    
+
         Ok(LCTHeader {
             len,
             cci,
@@ -362,18 +432,64 @@ impl FluteEgress {
             length: len,
         })
     }
-}
 
+    fn maybe_add_clock_object(&self, sender: &mut Sender) {
+        let now_instant = Instant::now();
+        {
+            let mut last_clock_object_at = self.last_clock_object_at.lock().unwrap();
+            if last_clock_object_at.is_some_and(|last| {
+                now_instant.saturating_duration_since(last) < FLUTE_CLOCK_OBJECT_INTERVAL
+            }) {
+                return;
+            }
+            *last_clock_object_at = Some(now_instant);
+        }
+
+        let Some(now_us) = current_time_us() else {
+            return;
+        };
+        let uri = format!("file://clock_{now_us}.txt");
+        let Ok(url) = url::Url::parse(&uri) else {
+            return;
+        };
+        let obj = ObjectDesc::create_from_buffer(
+            serde_json::json!({
+                "server_instance_id": self.server_instance_id.as_str(),
+                "remote_send_us": now_us,
+            })
+            .to_string()
+            .into_bytes(),
+            "text/plain",
+            &url,
+            1,
+            None,
+            None,
+            None,
+            None,
+            Cenc::Null,
+            true,
+            None,
+            false,
+        )
+        .unwrap();
+
+        if let Err(err) = sender.add_object(0, obj) {
+            error!("Failed to add FLUTE clock object: {:?}", err);
+        } else {
+            debug!("FLUTE clock object queued");
+        }
+    }
+}
 
 impl EgressProtocol for FluteEgress {
     #[inline]
     fn encoding_format(&self) -> EncodingFormat {
-        *self.encoding_format.lock().unwrap()
+        self.encoding_format.load()
     }
 
     #[inline]
-    fn max_number_of_points(&self) -> u64 {
-        *self.max_number_of_points.lock().unwrap()
+    fn max_number_of_primitives(&self) -> u64 {
+        self.max_number_of_primitives.load(Ordering::Relaxed)
     }
 
     fn ensure_threads_started(&self) {
@@ -393,7 +509,7 @@ impl EgressProtocol for FluteEgress {
             self.frame_buffer.clone(),
             self.fps.clone(),
             self.encoding_format.clone(),
-            self.max_number_of_points.clone(),
+            self.max_number_of_primitives.clone(),
         );
 
         let self_clone = self.clone();
@@ -403,7 +519,7 @@ impl EgressProtocol for FluteEgress {
             move |frame| {
                 self_clone.emit_frame_data(frame);
             },
-            false
+            false,
         );
 
         let self_clone = self.clone();
@@ -415,19 +531,29 @@ impl EgressProtocol for FluteEgress {
             .expect("Failed to spawn flute_transmitter thread");
     }
 
-    fn push_point_cloud(&self, point_cloud: PointCloudData, stream_id: String) {
+    fn push_spatial_frame(&self, spatial_frame: SpatialFrameData, stream_id: String) {
         self.ensure_threads_started();
-        self.aggregator.update_point_cloud(stream_id, point_cloud);
+        self.aggregator
+            .update_spatial_frame(stream_id, spatial_frame);
     }
 
     // Process and sends a frame, this raw version bypasses the aggregation
-    fn push_encoded_frame(&self, raw_data: Vec<u8>, _stream_id: String, mut creation_time: u64, presentation_time: u64, ring_buffer_bypass: bool, client_id: Option<u64>, tile_index: Option<u32>) {
+    fn push_encoded_frame(
+        &self,
+        raw_data: Vec<u8>,
+        _stream_id: String,
+        mut creation_time: u64,
+        presentation_time: u64,
+        ring_buffer_bypass: bool,
+        payload_metadata: Option<FramePayloadMetadata>,
+        client_id: Option<u64>,
+        quality_index: Option<u32>,
+    ) {
         // Ensure the threads are started
         self.ensure_threads_started();
 
         let self_clone = self.clone();
         let bypass = if ring_buffer_bypass {
-
             let since_the_epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards");
@@ -435,11 +561,12 @@ impl EgressProtocol for FluteEgress {
 
             Some(Box::new(move |frame| {
                 self_clone.emit_frame_data(frame);
-            }) as Box<dyn Fn(FrameTaskData) + Send + 'static>)
+            })
+                as Box<dyn Fn(FrameTaskData) + Send + 'static>)
         } else {
             None
         };
-        
+
         // Then call the “push_preencoded_frame_data”:
         push_preencoded_frame_data(
             "FLT_E",
@@ -447,12 +574,11 @@ impl EgressProtocol for FluteEgress {
             creation_time,
             presentation_time,
             raw_data, // data is moved
+            payload_metadata,
             bypass,
-            self.egress_metrics.bytes_to_send.clone(),
-            self.egress_metrics.frame_drops_full_egress_buffer.clone(),
-            self.egress_metrics.number_of_combined_frames.clone(),
+            self.egress_metrics.as_ref(),
             client_id,
-            tile_index,
+            quality_index,
         );
     }
 
@@ -464,7 +590,6 @@ impl EgressProtocol for FluteEgress {
             frame.presentation_time
         );
 
-
         //let start = std::time::Instant::now();
         // Initialize the FLUTE sender and UDP socket if not already done
         let mut sender_guard = self.sender.lock().unwrap();
@@ -472,34 +597,44 @@ impl EgressProtocol for FluteEgress {
             let mut udp_socket_guard = self.udp_socket.lock().unwrap();
 
             if sender_guard.is_none() || udp_socket_guard.is_none() {
-
-                // Create the FLUTE sender
-                // Create UDP Socket
+                let ttl = 2; // TODO: make configurable
+                             // Create the FLUTE sender
+                             // Create UDP Socket
                 let endpoint = self.endpoint.lock().unwrap().clone();
 
-                let dst: std::net::SocketAddr = format!("{}:{}", endpoint.destination_group_address, endpoint.port)
-                    .parse()
-                    .expect("invalid FLUTE dst");
+                let dst: std::net::SocketAddr =
+                    format!("{}:{}", endpoint.destination_group_address, endpoint.port)
+                        .parse()
+                        .expect("invalid FLUTE dst");
                 let socket = build_multicast_sender(UdpTxOpts {
                     dst,
-                    ttl_v4: Some(2),
-                    hops_v6: Some(2),
+                    ttl_v4: Some(ttl),
+                    hops_v6: Some(ttl),
                     v4_if: None,
                     v6_ifindex: None,
                     snd_buf_bytes: 8 * 1024 * 1024,
                     disable_loop: false,
                     //..Default::default()
-                }).expect("multicast Tx socket");
+                })
+                .expect("multicast Tx socket");
 
                 *udp_socket_guard = Some(socket);
 
                 // Create FLUTE Sender
                 let tsi = 1; // Transport Session Identifier
-                let oti = self.create_oti(self.fec.lock().unwrap().clone(), *self.fec_parity_percentage.lock().unwrap());
+                let oti = self.create_oti(
+                    self.fec.lock().unwrap().clone(),
+                    *self.fec_parity_percentage.lock().unwrap(),
+                );
                 let config = Config {
                     toi_initial_value: Some(*self.latest_toi.lock().unwrap()),
                     fdt_start_id: *self.fdt_id.lock().unwrap(),
-                    // fdt_publish_mode: flute::sender::FDTPublishMode::Automatic,
+                    // We could change the publish mode to ObjectsBeingTransferred instead of FullFDT.
+                    // However, we already remove objects from the FDT after sending them, so it should not matter.
+                    // TODO: verify this assumption. We might reduce some overhead by changing the mode.
+                    // If we use ObjectsBeingTransferred, then we need to remove the call to publish
+                    // as the library then automatically calls publish when adding objects.
+                    // fdt_publish_mode: flute::sender::FDTPublishMode::ObjectsBeingTransferred,
                     ..Default::default()
                 };
 
@@ -514,16 +649,24 @@ impl EgressProtocol for FluteEgress {
         let sender = sender_guard.as_mut().unwrap();
         //let udp_socket = udp_socket_guard.as_mut().unwrap();
 
-        let content_encoding = *self.content_encoding.lock().unwrap();
+        let content_encoding = self.content_encoding.load();
 
         // Prepare the frame data as an ObjectDesc
         let now = SystemTime::now();
-        let uri = format!("file://frame_{}_{}.bin", frame.presentation_time, frame.send_time);
-        // Convert the frame to JSON and then to bytes
-        //let bytes = serde_json::to_string(&frame).unwrap().as_bytes().to_vec();
-        debug!("Frame data as JSON converted to a vector of {} bytes", frame.data.len());
+        let uri = format!("file://f_{}.bin", frame.presentation_time);
+        let payload = match frame_task_to_pcf_wire(&frame) {
+            Ok(payload) => payload,
+            Err(err) => {
+                error!("Failed to encode FLUTE frame as PCF: {}", err);
+                return;
+            }
+        };
+        debug!(
+            "Frame data converted to a PCF payload of {} bytes",
+            payload.len()
+        );
         let obj = ObjectDesc::create_from_buffer(
-            frame.data,
+            payload,
             "application/octet-stream",
             &url::Url::parse(&uri).unwrap(),
             1,
@@ -535,7 +678,7 @@ impl EgressProtocol for FluteEgress {
             content_encoding,
             true,
             None,
-            *self.md5.lock().unwrap(),
+            self.md5.load(Ordering::Relaxed),
         )
         .unwrap();
 
@@ -558,7 +701,9 @@ impl EgressProtocol for FluteEgress {
         if toi > *latest_toi {
             *latest_toi = toi;
         }
-        
+        drop(latest_toi);
+
+        self.maybe_add_clock_object(sender);
 
         // t/*
         // Always call publish after adding objects, if fdt publish mode is manual
@@ -570,12 +715,9 @@ impl EgressProtocol for FluteEgress {
 
         debug!("FDT published");
         //*/
-
         // Increment the FDT ID
         let mut fdt_id = self.fdt_id.lock().unwrap();
         *fdt_id = (*fdt_id + 1) & 0xFFFFF;
-
-
 
         //let elapsed = start.elapsed();
         //info!("Frame conversion took: {:?} ms", elapsed);
@@ -639,7 +781,10 @@ impl EgressProtocol for FluteEgress {
         //let elapsed = start.elapsed();
         //info!("Frame emission took: {:?} ms", elapsed);
 
-        debug!("Frame emitted with send time: {}, presentation time: {} and toi {}", frame.send_time, frame.presentation_time, toi);
+        debug!(
+            "Frame emitted with send time: {}, presentation time: {} and toi {}",
+            frame.send_time, frame.presentation_time, toi
+        );
 
         // Remove the object from the FLUTE sender
         let _ = sender.remove_object(toi);
@@ -648,14 +793,15 @@ impl EgressProtocol for FluteEgress {
     }
 
     fn set_fps(&self, fps: u32) {
-        *self.fps.lock().unwrap() = fps;
+        self.fps.store(fps.max(1), Ordering::Relaxed);
     }
 
     fn set_encoding_format(&self, encoding_format: EncodingFormat) {
-        *self.encoding_format.lock().unwrap() = encoding_format;
+        self.encoding_format.store(encoding_format);
     }
 
-    fn set_max_number_of_points(&self, max_number_of_points: u64) {
-        *self.max_number_of_points.lock().unwrap() = max_number_of_points;
+    fn set_max_number_of_primitives(&self, max_number_of_primitives: u64) {
+        self.max_number_of_primitives
+            .store(max_number_of_primitives, Ordering::Relaxed);
     }
 }

@@ -11,7 +11,8 @@ use super::generic::Mp4Box;
 /// - `graphicsmode`: The transfer mode used (0 = copy mode by default).
 /// - `opcolor`: Optional color used with specific graphics modes (default: [0, 0, 0]).
 #[derive(Clone)]
-pub struct VmhdBox { // Video Media Header Box
+pub struct VmhdBox {
+    // Video Media Header Box
     pub version: u8,
     pub flags: u32,
     pub graphicsmode: u16,
@@ -44,11 +45,13 @@ impl std::fmt::Debug for VmhdBox {
 
 impl Mp4Box for VmhdBox {
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"vmhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"vmhd"
+    }
 
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 4 + 2 + 6  // header + version/flags + graphicsmode + opcolor (3*2)
+        8 + 4 + 2 + 6 // header + version/flags + graphicsmode + opcolor (3*2)
     }
 
     #[inline]
@@ -91,7 +94,7 @@ impl Mp4Box for VmhdBox {
                 graphicsmode,
                 opcolor,
             },
-            size
+            size,
         ))
     }
 }

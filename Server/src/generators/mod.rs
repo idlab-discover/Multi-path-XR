@@ -4,7 +4,8 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use shared_utils::types::{Point3D, PointCloudData};
+use shared_utils::types::{SpatialFrameData, SpatialPayload};
+use spatial_utils::point::Point3D;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // For vector/quaternion math
@@ -17,9 +18,9 @@ pub enum GeneratorName {
     Cube,
 }
 
-/// Placeholder function to generate a point cloud
+/// Placeholder function to generate a points frame.
 #[instrument(skip_all)]
-pub fn generate_basic_point_cloud() -> PointCloudData {
+pub fn generate_basic_points_frame() -> SpatialFrameData {
     // Generate some dummy points
     let points = vec![
         Point3D {
@@ -66,15 +67,15 @@ pub fn generate_basic_point_cloud() -> PointCloudData {
         .expect("Time went backwards");
     let current_time_us = since_the_epoch.as_micros() as u64;
 
-    PointCloudData {
-        points,
+    SpatialFrameData {
+        payload: SpatialPayload::Points(points),
         creation_time: current_time_us,
         presentation_time: current_time_us,
         error_count: 0,
     }
 }
 
-/// Convert an HSV color (h ∈ [0, 360), s ∈ [0, 1], v ∈ [0, 1]) 
+/// Convert an HSV color (h ∈ [0, 360), s ∈ [0, 1], v ∈ [0, 1])
 /// to an RGB tuple (r, g, b) ∈ [0, 1].
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (f32, f32, f32) {
     let h = h % 360.0;
@@ -104,12 +105,12 @@ fn float_to_u8_channel(v: f32) -> u8 {
 /// - Time-based rotation on all axes,
 /// - Lighting/shading from a given light direction.
 #[instrument(skip_all)]
-pub fn generate_shaded_cube_point_cloud(
-    cube_size: usize, // e.g., 10
-    cube_point_spacing: f32, // e.g., 1.0
-    light_direction: [f32; 3],// e.g., [1.0, 1.0, 1.0]
-    rotation_speed_degs_per_sec: f32,   // Degrees per second
-) -> PointCloudData {
+pub fn generate_shaded_cube_points_frame(
+    cube_size: usize,                 // e.g., 10
+    cube_point_spacing: f32,          // e.g., 1.0
+    light_direction: [f32; 3],        // e.g., [1.0, 1.0, 1.0]
+    rotation_speed_degs_per_sec: f32, // Degrees per second
+) -> SpatialFrameData {
     // 1) Current timestamp for hue and rotation
     let since_the_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -166,7 +167,7 @@ pub fn generate_shaded_cube_point_cloud(
                     let final_point = rotated_point_centered + center;
 
                     // (c) Approximate per-vertex normal for shading
-                    //     The logic is: 
+                    //     The logic is:
                     //       distance to center in each dimension ∈ [0,1],
                     //       direction left/right, up/down, back/front.
                     let distance_to_center_x = ((i as f32) - half_size).abs() / half_size;
@@ -200,10 +201,10 @@ pub fn generate_shaded_cube_point_cloud(
                     // (d) Compute diffuse intensity = dot(normal, light_dir)
                     let mut intensity = normalized_normal.dot(light_dir_normalized).clamp(0.0, 1.0);
 
-                    // (e) Remap intensity so we never go fully dark 
+                    // (e) Remap intensity so we never go fully dark
                     //     (similar to a "minimum ambient" in 3D)
                     //     e.g., 0.2..1.0 range
-                    intensity = 0.2 + intensity * 0.8; 
+                    intensity = 0.2 + intensity * 0.8;
 
                     // (f) Multiply base color by intensity
                     let shaded_r = float_to_u8_channel(base_r * intensity);
@@ -224,9 +225,8 @@ pub fn generate_shaded_cube_point_cloud(
         })
         .collect();
 
-    // Wrap up in your PointCloudData
-    PointCloudData {
-        points,
+    SpatialFrameData {
+        payload: SpatialPayload::Points(points),
         creation_time: current_time_us,
         presentation_time: current_time_us,
         error_count: 0,

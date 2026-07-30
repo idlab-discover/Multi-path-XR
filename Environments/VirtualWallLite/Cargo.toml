@@ -1,0 +1,18 @@
+[package]
+name = "virtual-wall-lite"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+serde_yaml.workspace = true
+toml.workspace = true
+thiserror = "1.0"
+tokio = { workspace = true, features = ["process", "fs", "io-util", "time", "rt-multi-thread", "macros", "sync"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+which = "6.0"
+quick-xml.workspace = true
+dirs = "5.0"

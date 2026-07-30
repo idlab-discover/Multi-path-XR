@@ -62,9 +62,9 @@ cd "$SCRIPT_DIR"
 
 
 if [[ $# -gt 0 ]]; then
-    python3 "$EXECUTABLE" "$@"
+    exec python3 "$EXECUTABLE" "$@"
 else
-    python3 "$EXECUTABLE"
+    exec python3 "$EXECUTABLE"
 fi
 
 

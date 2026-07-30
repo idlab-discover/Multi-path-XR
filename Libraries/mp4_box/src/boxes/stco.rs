@@ -14,10 +14,11 @@ use super::generic::Mp4Box;
 // The `StcoBox` is essential for enabling efficient access to media data chunks, as it provides the mapping
 // between chunk indices and their corresponding file offsets.
 #[derive(Clone)]
-pub struct StcoBox {  // Chunk Offset Box
-    pub version: u8,        // Full box version (should be 0)
-    pub flags: u32,         // Full box flags (24 bits used)
-    pub entries: Vec<u32>,  // List of chunk offsets
+pub struct StcoBox {
+    // Chunk Offset Box
+    pub version: u8,       // Full box version (should be 0)
+    pub flags: u32,        // Full box flags (24 bits used)
+    pub entries: Vec<u32>, // List of chunk offsets
 }
 
 // Provides a default implementation for the `StcoBox` struct.
@@ -27,9 +28,7 @@ impl Default for StcoBox {
         StcoBox {
             version: 0,
             flags: 0,
-            entries: vec![
-                0,
-            ],
+            entries: vec![0],
         }
     }
 }
@@ -50,7 +49,9 @@ impl std::fmt::Debug for StcoBox {
 impl Mp4Box for StcoBox {
     // Returns the box type as a 4-byte array. For `StcoBox`, the type is "stco".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"stco" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"stco"
+    }
 
     // Calculates the size of the `StcoBox` in bytes.
     // The size is fixed at 16 bytes, which includes:
@@ -59,9 +60,9 @@ impl Mp4Box for StcoBox {
     // - 4 bytes for the `entry_count` field.
     // - 4 bytes for each entry in the `entries` vector.
     #[inline(always)]
-    fn box_size(&self) -> u32 { 
+    fn box_size(&self) -> u32 {
         8 + 4 + 4 + (4 * self.entries.len() as u32)
-     }
+    }
 
     // Writes the `StcoBox` to the provided buffer.
     // The method serializes the box size, box type, version, flags, and `entry_count` into the buffer.

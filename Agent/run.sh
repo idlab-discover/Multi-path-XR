@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Clear the current screen
-clear
+#clear
 
 # Get the directory of the script
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,9 +37,14 @@ else
     EXECUTABLE="../target/x86_64-unknown-linux-gnu/debug/pc-agent"
 fi
 # Check if the file exists
-if [[ ! -x "$EXECUTABLE" ]]; then
-    echo "Error: Executable $EXECUTABLE not found or is not executable."
+if [[ ! -f "$EXECUTABLE" ]]; then
+    echo "Error: Executable $EXECUTABLE not found."
     exit 1
+fi
+
+# Make it executable if it is not
+if [[ ! -x "$EXECUTABLE" ]]; then
+    chmod +x "$EXECUTABLE"
 fi
 
 # Execute the target executable and pass all arguments
@@ -47,9 +52,9 @@ if [[ $# -gt 0 ]]; then
     # Echo all arguments
     echo "Running $EXECUTABLE with arguments: $@"
     # And log all output to a file
-    "$EXECUTABLE" "$@" #> agent.log 2>&1
+    exec "$EXECUTABLE" "$@" #> agent.log 2>&1
 else
-    "$EXECUTABLE" #> agent.log 2>&1
+    exec "$EXECUTABLE" #> agent.log 2>&1
 fi
 
 echo "The agent has stopped."

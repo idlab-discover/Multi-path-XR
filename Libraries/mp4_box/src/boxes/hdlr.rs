@@ -12,20 +12,20 @@ pub struct HdlrBox {
     pub version: u8,
     pub flags: u32,
     pub handler_type: [u8; 4], // Type of media (e.g., "vide" for video).
-    pub name: String,  // Null-terminated string providing the handler name.
+    pub name: String,          // Null-terminated string providing the handler name.
 }
 
 // Provides a default implementation for the `HdlrBox` struct.
 // The default `HdlrBox` has the following values:
 // - `handler_type`: "vide" (indicating a video track).
-// - `name`: "PointCloudHandler".
+// - `name`: "SpatialHandler".
 impl Default for HdlrBox {
     fn default() -> Self {
         HdlrBox {
             version: 0,
             flags: 0,
-            handler_type: *b"vide",   // Video track
-            name: "PointCloudHandler".to_string(),
+            handler_type: *b"vide", // Video track
+            name: "SpatialHandler".to_string(),
         }
     }
 }
@@ -43,12 +43,13 @@ impl std::fmt::Debug for HdlrBox {
     }
 }
 
-
 // Implementation of the `Mp4Box` trait for the `HdlrBox` struct.
 impl Mp4Box for HdlrBox {
     // Returns the box type as a 4-byte array. For `HdlrBox`, the type is "hdlr".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"hdlr" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"hdlr"
+    }
 
     // Calculates the size of the `HdlrBox` in bytes.
     // The size includes:
@@ -60,7 +61,7 @@ impl Mp4Box for HdlrBox {
     // - The length of the `name` field plus 1 byte for the null-terminator.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        8 + 4 + 4 + 4 + 12 + (self.name.len() as u32 + 1)  // +1 for null-terminator
+        8 + 4 + 4 + 4 + 12 + (self.name.len() as u32 + 1) // +1 for null-terminator
     }
 
     // Writes the `HdlrBox` to the provided buffer.
@@ -74,18 +75,18 @@ impl Mp4Box for HdlrBox {
         buffer.extend_from_slice(&self.box_type());
         // Write the version (1 byte) and flags (3 bytes).
         buffer.push(self.version);
-        buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]);  // 3-byte flags
-        
+        buffer.extend_from_slice(&(self.flags & 0x00FFFFFF).to_be_bytes()[1..]); // 3-byte flags
+
         // Write the `pre_defined` field (4 bytes, set to 0).
         buffer.extend_from_slice(&0u32.to_be_bytes());
         // Write the `handler_type` field (4 bytes).
-        buffer.extend_from_slice(&self.handler_type);   // e.g., b"vide"
-        // Write the `reserved` array (3 x 4 bytes, all set to 0).
+        buffer.extend_from_slice(&self.handler_type); // e.g., b"vide"
+                                                      // Write the `reserved` array (3 x 4 bytes, all set to 0).
         buffer.extend_from_slice(&[0u32.to_be_bytes(); 3].concat());
 
         // Write the `name` field as a null-terminated string.
         buffer.extend_from_slice(self.name.as_bytes());
-        buffer.push(0);  // Null-terminator for the name
+        buffer.push(0); // Null-terminator for the name
     }
 
     fn read_box(data: &[u8]) -> Result<(Self, usize), String> {
@@ -118,7 +119,7 @@ impl Mp4Box for HdlrBox {
                 handler_type,
                 name,
             },
-            size
+            size,
         ))
     }
 }

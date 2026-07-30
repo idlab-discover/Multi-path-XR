@@ -15,14 +15,15 @@ use super::generic::Mp4Box;
 //   This value is expressed in the timescale units.
 // - `language`: The language of the media, represented as an ISO 639-2/T language code (e.g., "und").
 #[derive(Clone)]
-pub struct MdhdBox { // Media Header Box
+pub struct MdhdBox {
+    // Media Header Box
     pub version: u8,
     pub flags: u32,
     pub creation_time: u64,
     pub modification_time: u64,
     pub timescale: u32,
     pub duration: u64,
-    pub language: String,  // ISO 639-2/T language code, e.g., "und"
+    pub language: String, // ISO 639-2/T language code, e.g., "und"
 }
 
 // Provides a default implementation for the `MdhdBox` struct.
@@ -41,7 +42,7 @@ impl Default for MdhdBox {
             modification_time: 0,
             timescale: 30_000,
             duration: 0,
-            language: "und".to_string(),  // ISO 639-2/T language code
+            language: "und".to_string(), // ISO 639-2/T language code
         }
     }
 }
@@ -66,7 +67,9 @@ impl std::fmt::Debug for MdhdBox {
 impl Mp4Box for MdhdBox {
     // Returns the box type as a 4-byte array. For `MdhdBox`, the type is "mdhd".
     #[inline(always)]
-    fn box_type(&self) -> [u8; 4] { *b"mdhd" }
+    fn box_type(&self) -> [u8; 4] {
+        *b"mdhd"
+    }
 
     // Calculates the size of the `MdhdBox` in bytes.
     // The size includes:
@@ -77,9 +80,9 @@ impl Mp4Box for MdhdBox {
     // - 2 bytes for the `pre_defined` field.
     #[inline(always)]
     fn box_size(&self) -> u32 {
-        let base = 8 + 4;  // header + version/flags
+        let base = 8 + 4; // header + version/flags
         let variable = if self.version == 1 { 28 } else { 16 };
-        base + variable + 4  // + language (2) + pre_defined (2)
+        base + variable + 4 // + language (2) + pre_defined (2)
     }
 
     // Writes the `MdhdBox` to the provided buffer.
@@ -108,7 +111,7 @@ impl Mp4Box for MdhdBox {
         let lang_code = encode_language(&self.language);
         buffer.extend_from_slice(&lang_code.to_be_bytes());
 
-        buffer.extend_from_slice(&0u16.to_be_bytes());  // pre_defined
+        buffer.extend_from_slice(&0u16.to_be_bytes()); // pre_defined
     }
 
     fn read_box(data: &[u8]) -> Result<(Self, usize), String> {
@@ -125,28 +128,32 @@ impl Mp4Box for MdhdBox {
         let flags = u32::from_be_bytes([0, data[9], data[10], data[11]]);
 
         let (creation_time, modification_time, timescale, duration, lang_offset) = if version == 1 {
-            if size < 44 { return Err("MDHD v1 box too small".into()); }
+            if size < 44 {
+                return Err("MDHD v1 box too small".into());
+            }
             (
                 u64::from_be_bytes(data[12..20].try_into().unwrap()),
                 u64::from_be_bytes(data[20..28].try_into().unwrap()),
                 u32::from_be_bytes(data[28..32].try_into().unwrap()),
                 u64::from_be_bytes(data[32..40].try_into().unwrap()),
-                40
+                40,
             )
         } else if version == 0 {
-            if size < 32 { return Err("MDHD v0 box too small".into()); }
+            if size < 32 {
+                return Err("MDHD v0 box too small".into());
+            }
             (
                 u32::from_be_bytes(data[12..16].try_into().unwrap()) as u64,
                 u32::from_be_bytes(data[16..20].try_into().unwrap()) as u64,
                 u32::from_be_bytes(data[20..24].try_into().unwrap()),
                 u32::from_be_bytes(data[24..28].try_into().unwrap()) as u64,
-                28
+                28,
             )
         } else {
             return Err("Unsupported MDHD version".into());
         };
 
-        let lang_code = u16::from_be_bytes(data[lang_offset..lang_offset+2].try_into().unwrap());
+        let lang_code = u16::from_be_bytes(data[lang_offset..lang_offset + 2].try_into().unwrap());
         let language = decode_language(lang_code);
 
         Ok((
@@ -159,7 +166,7 @@ impl Mp4Box for MdhdBox {
                 duration,
                 language,
             },
-            size
+            size,
         ))
     }
 }
@@ -182,16 +189,15 @@ fn encode_language(lang: &str) -> u16 {
     if bytes.len() != 3 {
         panic!("Language code must be exactly 3 characters");
     }
-    (((bytes[0] - 0x60) as u16) << 10) |
-    (((bytes[1] - 0x60) as u16) << 5)  |
-    ((bytes[2] - 0x60) as u16)
+    (((bytes[0] - 0x60) as u16) << 10)
+        | (((bytes[1] - 0x60) as u16) << 5)
+        | ((bytes[2] - 0x60) as u16)
 }
-
 
 fn decode_language(code: u16) -> String {
     let mut lang = String::new();
     lang.push((((code >> 10) & 0x1F) + 0x60) as u8 as char);
     lang.push((((code >> 5) & 0x1F) + 0x60) as u8 as char);
-    lang.push(((code       & 0x1F) + 0x60) as u8 as char);
+    lang.push(((code & 0x1F) + 0x60) as u8 as char);
     lang
 }

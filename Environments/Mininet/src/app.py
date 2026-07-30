@@ -1,8 +1,10 @@
 # main.py
 
 import json
+import heapq
+import math
 import os
-import random
+import signal
 import subprocess
 import sys
 import threading
@@ -13,17 +15,486 @@ from urllib.parse import parse_qs, urlparse
 from mininet.clean import cleanup
 from mininet.net import Mininet
 from mininet.link import TCLink
-from mininet.log import setLogLevel, info
+from mininet.log import setLogLevel, info as mn_info, error as mn_error, lg as mn_lg, StreamHandlerNoNewline
+import logging
 from mininet.util import sysctlTestAndSet
 from topology import NetworkTopo
 import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from io import BytesIO
-from PIL import Image
 
-net = None # We store the Mininet network globaly.
+# split Mininet logs across stdout/stderr
+def _route_mininet_logs():
+    class _AboveWarning(logging.Filter):
+        def filter(self, record):
+            return record.levelno > logging.WARNING
+
+    for h in list(mn_lg.handlers):
+        if isinstance(h, StreamHandlerNoNewline) and getattr(h, 'stream', None) is sys.stderr:
+            h.addFilter(_AboveWarning())
+
+    # add a new handler that sends DEBUG/INFO/OUTPUT to stdout
+    h_out = StreamHandlerNoNewline(stream=sys.stdout)
+    h_out.setFormatter(logging.Formatter('%(message)s'))
+
+    class _BelowOrEqualWarning(logging.Filter):
+        def filter(self, record):
+            # DEBUG(10), INFO(20), OUTPUT(25) < WARNING(30)
+            return record.levelno <= logging.WARNING
+
+    h_out.addFilter(_BelowOrEqualWarning())
+    h_out.setLevel(logging.DEBUG)  # allow DEBUG/INFO/OUTPUT through
+    mn_lg.addHandler(h_out)
+    # avoid accidental duplication via root logger
+    mn_lg.propagate = False
+
+_route_mininet_logs()
+
+def info(msg: str, *args) -> None:
+    """Log info messages with Mininet's info function, adding a newline only when needed."""
+    text = msg if msg.endswith("\n") else msg + "\n"
+    mn_info(text, *args)
+
+def error(msg: str, *args) -> None:
+    """Log error messages with Mininet's error function, adding a newline only when needed."""
+    text = msg if msg.endswith("\n") else msg + "\n"
+    mn_error(text, *args)
+
+net: Mininet = None # We store the Mininet network globaly.
 lock = threading.Lock()  # Global lock for sequential processing
+_BG_PROCS = {}  # pid -> subprocess.Popen
+_BG_GROUPS = {}  # pgid -> set of pids (the process group leaders we created)
+
+
+def _safe_add_route(node, route_cmd: str) -> None:
+    """Install a route but avoid startup aborts if it already exists."""
+    result = node.cmd(route_cmd)
+    if result and 'File exists' not in result:
+        info(result)
+
+
+def _build_router_link_graph(net: Mininet, router_names: set[str]) -> dict[str, list[dict[str, str]]]:
+    """Build an adjacency list with interface/next-hop metadata for router-to-router links."""
+    graph: dict[str, list[dict[str, str]]] = {name: [] for name in router_names}
+
+    for link in net.links:
+        if link is None:
+            continue
+
+        a = link.intf1.node.name
+        b = link.intf2.node.name
+        if a not in router_names or b not in router_names:
+            continue
+
+        graph[a].append({
+            'neighbor': b,
+            'dev': link.intf1.name,
+            'next_hop': link.intf2.IP(),
+        })
+        graph[b].append({
+            'neighbor': a,
+            'dev': link.intf2.name,
+            'next_hop': link.intf1.IP(),
+        })
+
+    return graph
+
+
+def _shortest_path_next_hop(graph: dict[str, list[dict[str, str]]], src: str, dst: str):
+    """Return (dev, next_hop) to reach dst from src using shortest path in hop count."""
+    if src == dst:
+        return None
+
+    dist = {src: 0}
+    prev = {}
+    queue = [(0, src)]
+
+    while queue:
+        d, node = heapq.heappop(queue)
+        if node == dst:
+            break
+        if d > dist.get(node, float('inf')):
+            continue
+
+        for edge in graph.get(node, []):
+            neighbor = edge['neighbor']
+            nd = d + 1
+            if nd < dist.get(neighbor, float('inf')):
+                dist[neighbor] = nd
+                prev[neighbor] = (node, edge)
+                heapq.heappush(queue, (nd, neighbor))
+
+    if dst not in prev:
+        return None
+
+    cursor = dst
+    while prev[cursor][0] != src:
+        cursor = prev[cursor][0]
+
+    first_edge = prev[cursor][1]
+    return (first_edge['dev'], first_edge['next_hop'])
+
+
+def _is_truthy(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _parse_geant_hop_weights(raw: str | None) -> dict[int, int]:
+    """Parse hop->weight map from '1:16,2:8,3:4' style config."""
+    default_weights = {1: 16, 2: 8, 3: 4, 4: 2, 5: 1}
+    if raw is None:
+        return default_weights
+
+    parsed: dict[int, int] = {}
+    for token in str(raw).split(','):
+        token = token.strip()
+        if not token or ':' not in token:
+            continue
+        hop_part, weight_part = token.split(':', 1)
+        try:
+            hop = int(hop_part.strip())
+            weight = int(weight_part.strip())
+        except ValueError:
+            continue
+        if hop <= 0 or weight <= 0:
+            continue
+        parsed[hop] = weight
+
+    return parsed if parsed else default_weights
+
+
+def _shortest_distances_to_dst(graph: dict[str, list[dict[str, str]]], dst: str) -> dict[str, int]:
+    """Compute hop count from every router to dst in an unweighted graph."""
+    dist: dict[str, int] = {dst: 0}
+    queue: list[str] = [dst]
+    idx = 0
+
+    while idx < len(queue):
+        node = queue[idx]
+        idx += 1
+        base = dist[node]
+        for edge in graph.get(node, []):
+            neighbor = edge['neighbor']
+            if neighbor in dist:
+                continue
+            dist[neighbor] = base + 1
+            queue.append(neighbor)
+
+    return dist
+
+
+def _build_weighted_nexthops(
+    graph: dict[str, list[dict[str, str]]],
+    src: str,
+    dst: str,
+    hop_weights: dict[int, int],
+    max_next_hops: int,
+) -> list[dict[str, int | str]]:
+    """Build weighted next-hop candidates from src to dst using static hop-based weights."""
+    distances = _shortest_distances_to_dst(graph, dst)
+    candidates = []
+    for edge in graph.get(src, []):
+        neighbor = edge['neighbor']
+        if neighbor not in distances:
+            continue
+
+        total_hops = 1 + distances[neighbor]
+        weight = hop_weights.get(total_hops, 1)
+        if weight <= 0:
+            continue
+
+        candidates.append({
+            'dev': edge['dev'],
+            'next_hop': edge['next_hop'],
+            'weight': weight,
+            'hops': total_hops,
+        })
+
+    candidates.sort(key=lambda c: (c['hops'], -c['weight'], str(c['dev']), str(c['next_hop'])))
+    if max_next_hops > 0:
+        candidates = candidates[:max_next_hops]
+
+    return candidates
+
+
+def _configure_basic_nat_routes(net: Mininet, nat, nat_intf: str, n_nodes: int, n_routers: int) -> None:
+    for n in range(1, n_nodes + 1):
+        _safe_add_route(nat, f'ip route add 11.0.{n}.0/24 via 11.0.{n_nodes+1}.1 dev {nat_intf}')
+
+    for n in range(1, n_routers + 1):
+        _safe_add_route(nat, f'ip route add 11.{10 + n + 1}.1.0/24 via 11.0.{n_nodes+1}.1 dev {nat_intf}')
+
+        router = net[f'r{n+1}']
+        router_to_nat_intf = [intf for intf in router.intfList() if intf.IP().startswith(f'11.{10 + n + 1}.')][0]
+        _safe_add_route(router, f'ip route add 11.0.{n_nodes+1}.0/24 via 11.{10 + n + 1}.1.1 dev {router_to_nat_intf}')
+
+
+def _configure_geant_routes(
+    net: Mininet,
+    topo,
+    nat,
+    nat_intf: str,
+    n_nodes: int,
+    weighted_nexthops: bool = False,
+    hop_weights_raw: str | None = None,
+) -> None:
+    nat_router_ip = f'11.0.{n_nodes+1}.1'
+    nat_router = net.get('r1')
+
+    # NAT must reach all node LANs and all nat-router uplink subnets.
+    for n in range(1, n_nodes + 1):
+        _safe_add_route(nat, f'ip route add 11.0.{n}.0/24 via {nat_router_ip} dev {nat_intf}')
+
+    geant_router_names = {f'r{i+1}' for i in range(1, n_nodes + 1)}
+    for idx in range(1, n_nodes + 1):
+        subnet_octet = 11 + idx
+        _safe_add_route(nat, f'ip route add 11.{subnet_octet}.1.0/24 via {nat_router_ip} dev {nat_intf}')
+
+        router = net[f'r{idx+1}']
+        router_uplink_intf = None
+        nat_router_uplink_intf = None
+        for link in net.links:
+            a = link.intf1.node.name
+            b = link.intf2.node.name
+            if {a, b} != {router.name, 'r1'}:
+                continue
+
+            if a == router.name:
+                router_uplink_intf = link.intf1
+                nat_router_uplink_intf = link.intf2
+            else:
+                router_uplink_intf = link.intf2
+                nat_router_uplink_intf = link.intf1
+            break
+
+        if router_uplink_intf is None or nat_router_uplink_intf is None:
+            raise RuntimeError(f'GEANT: uplink between {router.name} and r1 not found')
+
+        router_uplink_dev = str(router_uplink_intf)
+        nat_router_uplink_dev = str(nat_router_uplink_intf)
+        expected_router_uplink_ip = f'11.{subnet_octet}.1.2/24'
+        expected_nat_router_uplink_ip = f'11.{subnet_octet}.1.1/24'
+
+        if not router_uplink_intf.IP() or not router_uplink_intf.IP().startswith(f'11.{subnet_octet}.1.'):
+            router.cmd(f'ip addr replace {expected_router_uplink_ip} dev {router_uplink_dev}')
+        if not nat_router_uplink_intf.IP() or not nat_router_uplink_intf.IP().startswith(f'11.{subnet_octet}.1.'):
+            nat_router.cmd(f'ip addr replace {expected_nat_router_uplink_ip} dev {nat_router_uplink_dev}')
+
+        _safe_add_route(
+            router,
+            f'ip route add 11.0.{n_nodes+1}.0/24 via 11.{subnet_octet}.1.1 dev {router_uplink_dev}',
+        )
+
+    # NAT must be able to return traffic to rmc's management subnet.
+    _safe_add_route(nat, f'ip route add 11.254.1.0/24 via {nat_router_ip} dev {nat_intf}')
+
+    # Multicast backbone router needs explicit reachability to controller/NAT networks.
+    try:
+        rmc = net.get('rmc')
+    except Exception:
+        rmc = None
+
+    if rmc is not None:
+        r1 = net.get('r1')
+        rmc_mgmt_intf = None
+        r1_mgmt_intf = None
+
+        # Find the dedicated management link by topology relation (rmc <-> r1),
+        # which is more reliable than searching interfaces by preconfigured IP.
+        for link in net.links:
+            a = link.intf1.node.name
+            b = link.intf2.node.name
+            if {a, b} == {'rmc', 'r1'}:
+                if a == 'rmc':
+                    rmc_mgmt_intf = link.intf1
+                    r1_mgmt_intf = link.intf2
+                else:
+                    rmc_mgmt_intf = link.intf2
+                    r1_mgmt_intf = link.intf1
+                break
+
+        if rmc_mgmt_intf is not None and r1_mgmt_intf is not None:
+            mgmt_dev = str(rmc_mgmt_intf)
+
+            # Ensure management IPs exist even if Mininet interface params were not applied.
+            if not rmc_mgmt_intf.IP() or not rmc_mgmt_intf.IP().startswith('11.254.'):
+                rmc.cmd(f'ip addr replace 11.254.1.2/24 dev {mgmt_dev}')
+            r1_mgmt_dev = str(r1_mgmt_intf)
+            if not r1_mgmt_intf.IP() or not r1_mgmt_intf.IP().startswith('11.254.'):
+                r1.cmd(f'ip addr replace 11.254.1.1/24 dev {r1_mgmt_dev}')
+
+            # Broad control-plane route for controller/NAT side addresses.
+            _safe_add_route(rmc, f'ip route add 11.0.0.0/16 via 11.254.1.1 dev {mgmt_dev}')
+            # Keep explicit NAT subnet route for clarity and compatibility with older setups.
+            _safe_add_route(rmc, f'ip route add 11.0.{n_nodes+1}.0/24 via 11.254.1.1 dev {mgmt_dev}')
+            info(f'Configured rmc control-plane routes via {mgmt_dev}')
+        else:
+            error('GEANT: rmc<->r1 management link not found; controller reachability may fail.')
+
+    # Auto-provision unicast routes across the GEANT backbone.
+    graph = _build_router_link_graph(net, geant_router_names)
+    hop_weights = _parse_geant_hop_weights(hop_weights_raw)
+    max_next_hops = max(1, int(os.getenv('GEANT_MAX_NEXTHOPS', '4')))
+    if weighted_nexthops:
+        info(f"GEANT weighted nexthops enabled (hop weights: {hop_weights}, max_nexthops={max_next_hops})")
+
+    for src_idx in range(1, n_nodes + 1):
+        src_name = f'r{src_idx+1}'
+        src_router = net[src_name]
+        for dst_idx in range(1, n_nodes + 1):
+            if src_idx == dst_idx:
+                continue
+
+            dst_name = f'r{dst_idx+1}'
+            dest_subnet = f'13.0.{dst_idx}.0/24'
+
+            if weighted_nexthops:
+                nexthops = _build_weighted_nexthops(
+                    graph=graph,
+                    src=src_name,
+                    dst=dst_name,
+                    hop_weights=hop_weights,
+                    max_next_hops=max_next_hops,
+                )
+
+                if nexthops:
+                    if len(nexthops) == 1:
+                        nh = nexthops[0]
+                        _safe_add_route(src_router, f"ip route replace {dest_subnet} via {nh['next_hop']} dev {nh['dev']}")
+                    else:
+                        nexthop_args = ' '.join(
+                            f"nexthop via {nh['next_hop']} dev {nh['dev']} weight {nh['weight']}"
+                            for nh in nexthops
+                        )
+                        route_cmd = f'ip route replace {dest_subnet} {nexthop_args}'
+                        result = src_router.cmd(route_cmd)
+                        if result and 'File exists' not in result:
+                            info(result)
+                    continue
+
+            hop = _shortest_path_next_hop(graph, src_name, dst_name)
+            if hop is None:
+                error(f'No GEANT path between {src_name} and {dst_name}')
+                continue
+
+            out_dev, next_hop_ip = hop
+            _safe_add_route(src_router, f'ip route add {dest_subnet} via {next_hop_ip} dev {out_dev}')
+
+def _pump_stream(stream, log_fn, prefix):
+    """Read a stream line-by-line and forward to Mininet logger."""
+    def run():
+        try:
+            for line in iter(stream.readline, ''):
+                if not line:
+                    break
+                # Ensure lines end with \n so your Rust line-reader flushes promptly.
+                if not line.endswith('\n'):
+                    line += '\n'
+                # Don't print empty lines
+                if line.strip():
+                    log_fn(f"{prefix} {line}")
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+
+def _track_bg(proc, node_name, command):
+    """Remember the bg process and its group and log when it exits."""
+    global _BG_PROCS, _BG_GROUPS
+    _BG_PROCS[proc.pid] = proc
+    try:
+        pgid = os.getpgid(proc.pid)
+        _BG_GROUPS[proc.pid] = pgid
+    except Exception:
+        pass
+
+    def waiter():
+        rc = proc.wait()
+        # do NOT eagerly drop the PG record; keep it until /stop cleans it
+        _BG_PROCS.pop(proc.pid, None)
+        info(f"[{node_name}] process {proc.pid} exited with code {rc}")
+    threading.Thread(target=waiter, daemon=True).start()
+
+def _shutdown_bg_processes(timeout_sec: float = 3.0):
+    """Try to gracefully stop all tracked background processes."""
+    global _BG_PROCS, _BG_GROUPS, net
+
+    my_pgid = os.getpgrp()
+    my_pid = os.getpid()
+
+    items = list(_BG_PROCS.items())
+    groups = list(_BG_GROUPS.items())
+
+    if not items and not groups:
+        info("No background processes to stop.")
+        return
+
+    info(f"Stopping {len(items)} tracked process(es), {len(groups)} group(s)...")
+
+    # TERM by process handle (best effort)
+    for pid, proc in items:
+        if proc.poll() is None:
+            try:
+                # Do not try to kill our own process
+                if pid == my_pid:
+                    continue
+
+                pgid = os.getpgid(proc.pid)
+                # Don't try to kill our own process group
+                if pgid == my_pgid:
+                    # Instead, just terminate the process directly
+                    info(f"SIGTERM pid {pid}")
+                    os.kill(pid, signal.SIGTERM)
+                    continue
+
+                # The process belongs to a separate process group; kill the whole group
+                info(f"SIGTERM pgid {pgid} (pid {pid})")
+                os.killpg(pgid, signal.SIGTERM)
+            except Exception as e:
+                error(f"Failed SIGTERM via handle {pid}: {e}")
+
+    # TERM by remembered groups (covers early-exiting wrappers)
+    for pid, pgid in groups:
+        try:
+            if pgid == my_pgid:
+                continue
+            info(f"SIGTERM remembered pgid {pgid} (from pid {pid})")
+            os.killpg(pgid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            error(f"Failed SIGTERM pgid {pgid}: {e}")
+
+    # Give them a moment
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        time.sleep(0.05)
+
+    # KILL leftovers
+    for pid, pgid in groups:
+        try:
+            if pgid == my_pgid:
+                info(f"Skip SIGKILL pgid {pgid} (own PG)")
+                continue
+            info(f"SIGKILL remembered pgid {pgid} (from pid {pid})")
+            os.killpg(pgid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except Exception as e:
+            error(f"Failed SIGKILL pgid {pgid}: {e}")
+
+    _BG_PROCS.clear()
+    _BG_GROUPS.clear()
+
+    info("Background process cleanup complete.")
 
 class SimpleRouter:
     """A simple router to handle path-based requests with HTTP method support."""
@@ -84,6 +555,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             try:
                 with lock:
                     handler(self, query_params, body)
+            except (BrokenPipeError, ConnectionResetError):
+                info(f"Client disconnected before '{parsed_path.path}' response was sent")
             except Exception as e:
                 self._send_response(500, {"error": str(e)})
         else:
@@ -102,11 +575,18 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _send_response(self, code, message):
         """Send a JSON response."""
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Connection", "close") # We don't support persistent connections
-        self.end_headers()
-        self.wfile.write(json.dumps(message).encode("utf-8"))
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Connection", "close") # We don't support persistent connections
+            self.end_headers()
+            self.wfile.write(json.dumps(message).encode("utf-8"))
+
+            return True
+        except (BrokenPipeError, ConnectionResetError):
+            info(f"Client disconnected while sending HTTP {code} response")
+
+        return False
 
     def _send_chunked_start(self):
         """Start a chunked response."""
@@ -127,6 +607,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _send_chunked_end(self):
         """End the chunked response."""
         self.wfile.write(b"0\r\n\r\n")
+
+    def log_message(self, format, *args):
+        # Send access logs to stdout (Mininet info), with newline so your reader flushes.
+        mn_info(f"{self.client_address[0]} [{self.log_date_time_string()}] {format % args}\n")
 
 # Route definitions
 @router.route("/start", methods=["GET"])
@@ -174,18 +658,23 @@ def start_network(request_handler=None, query_params=None, body=None) -> Mininet
         nat = net['nat0']
         # Search for the interface that is connected to the NAT router
         nat_intf = [intf for intf in nat.intfList() if intf.IP().startswith('11.0.')][0]
-        # We need to set the routes for the NAT router, we have to redirect all outside traffic to the nat router
-        for n in range(1, n_nodes+1):
-            info(nat.cmd(f'ip route add 11.0.{n}.0/24 via 11.0.{n_nodes+1}.1 dev {nat_intf}'))
 
-        for n in range(1, n_routers+1):
-            # We need to set the routes for the NAT router, we have to redirect all outside traffic to the nat router
-            info(nat.cmd(f'ip route add 11.{10 + n + 1}.1.0/24 via 11.0.{n_nodes+1}.1 dev {nat_intf}'))
-
-            # We need to set the other way around as well, so the routers know how to reach the nat router
-            router = net[f'r{n+1}']
-            router_to_nat_intf = [intf for intf in router.intfList() if intf.IP().startswith(f'11.{10 + n + 1}.')][0]
-            info(router.cmd(f'ip route add 11.0.{n_nodes+1}.0/24 via 11.{10 + n + 1}.1.1 dev {router_to_nat_intf}'))
+        topology_mode = getattr(topo, 'topology_mode', 'basic')
+        if topology_mode == 'geant':
+            geant_nodes = getattr(topo, 'geant_node_count', n_nodes)
+            geant_weighted_nexthops = _is_truthy(query_params.get('geant_weighted_nexthops', ['false'])[0])
+            geant_hop_weights = query_params.get('geant_hop_weights', [None])[0]
+            _configure_geant_routes(
+                net,
+                topo,
+                nat,
+                nat_intf,
+                geant_nodes,
+                weighted_nexthops=geant_weighted_nexthops,
+                hop_weights_raw=geant_hop_weights,
+            )
+        else:
+            _configure_basic_nat_routes(net, nat, nat_intf, n_nodes, n_routers)
 
         # Make all the switches do L2 forwarding
         # We skip the first switch, as that is just to our NAT router
@@ -215,6 +704,10 @@ def stop_network(request_handler=None, query_params=None, body=None) -> bool:
     
     info("Stopping Mininet network")
     try:
+        # 1) Stop/kill any background processes we spawned explicitly
+        _shutdown_bg_processes(timeout_sec=2.0)
+
+        # 2) Then stop the Mininet network and cleanup
         net.stop()
         cleanup()
         net = None
@@ -245,7 +738,7 @@ def execute_command(request_handler=None, query_params=None, body=None) -> bool:
     command = query_params.get("command", [None])[0]
     background = query_params.get("background", ["false"])[0].lower() == "true"
 
-    info(f"Executing command '{command}' on node '{node_name}'")
+    info(f"Executing command '{command}' on node '{node_name}' (background: {background})")
 
     if not node_name or not command:
         if request_handler:
@@ -255,12 +748,26 @@ def execute_command(request_handler=None, query_params=None, body=None) -> bool:
     try:
         node = net.get(node_name)
         if background:
-            # Ensure the command ends with '&' for background execution
-            if not command.strip().endswith("&"):
-                command += " &"
+            # --- sanitize the command ---
+            safe_cmd = command.strip()
+            if safe_cmd.startswith("sudo "):
+                # This program is already running as root, so sudo is redundant and may cause issues
+                safe_cmd = safe_cmd[5:].strip()
 
-            # Execute the command
-            node.cmd(command)
+            proc = node.popen(
+                safe_cmd,
+                shell=True,                # important: avoid /bin/sh -c wrapper
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,    # text mode
+                bufsize=1,                  # line-buffered if the child flushes lines
+                start_new_session=False      # creates its own process group for clean kills
+            )
+
+            prefix = f"[{node_name}]"
+            _pump_stream(proc.stdout, info, prefix)   # stdout -> info
+            _pump_stream(proc.stderr, error, prefix)  # stderr -> error
+            _track_bg(proc, node_name, command)
 
             if request_handler:
                 request_handler._send_response(200, {"message": f"Background command executed on node '{node_name}'"})
@@ -335,11 +842,13 @@ def list_links(request_handler=None, query_params=None, body=None) -> list:
     
     #info("Getting all the links in the Mininet network")
     try:
-        links = []
+        links: list[dict] = []
         for link in net.links:
+            if link is None:
+                continue
             # Retrieve IP addresses of both interfaces, if they exist
-            ip1 = link.intf1.IP() if link.intf1.IP() is not None else "N/A"
-            ip2 = link.intf2.IP() if link.intf2.IP() is not None else "N/A"
+            ip1 = link.intf1.IP() if link.intf1 is not None and link.intf1.IP() is not None else "N/A"
+            ip2 = link.intf2.IP() if link.intf2 is not None and link.intf2.IP() is not None else "N/A"
             links.append({
                 "node1": link.intf1.node.name,
                 "intf1": link.intf1.name,
@@ -417,11 +926,7 @@ def visualize_network(request_handler=None, query_params=None, body=None):
                 status=link["status"]
             )
 
-        node_size = 3000
         line_width = 2.5
-        font_size = 10
-        font_color = "white"
-        font_weight = "bold"
         fig_width, fig_height = 24, 8
 
     
@@ -437,13 +942,12 @@ def visualize_network(request_handler=None, query_params=None, body=None):
         # Assign colors to nodes based on their type
         node_colors = [color_map.get(G.nodes[node].get("type"), "black") for node in G.nodes()]
 
-        # Find all routers (note that some switches may be called a router (for ease of use when detecting them in our project))
+        # Find all routers (note that some switches may be called a router for ease of detection).
         router_nodes = [node["name"] for node in status["nodes"] if node.get("type") == "LinuxRouter" or node["name"].startswith("r")]
-        # Force add controller to the router nodes
-        router_nodes.insert(0, "c0")
         edge_nodes = [node["name"] for node in status["nodes"] if node.get("type") == "EdgeNode" and node["name"] not in router_nodes]
-        # Add the NAT to the edge nodes
-        edge_nodes.insert(0, "nat0")
+        # Add NAT to edge nodes when present in the graph.
+        if "nat0" in G and "nat0" not in edge_nodes:
+            edge_nodes.insert(0, "nat0")
         other_nodes = [node["name"] for node in status["nodes"] if node["name"] not in router_nodes + edge_nodes]
 
 
@@ -491,8 +995,6 @@ def visualize_network(request_handler=None, query_params=None, body=None):
                     if neighbor not in visited:
                         visited.add(neighbor)
                         edge = tuple(sorted((current, neighbor))) 
-                        reverse_edge = (neighbor, current)
-
                         # Safely find the edge index
                         try:
                             edge_index = sorted_edges.index(edge)
@@ -510,30 +1012,78 @@ def visualize_network(request_handler=None, query_params=None, body=None):
                         if G.nodes[neighbor]["type"] == "OVSSwitch":
                             queue.append((neighbor, edge))
 
-        edge_styles = [
-            "solid" if G.edges[edge]["status"] == "up" else "dashed"
-            for edge in G.edges
-        ]
-
         # Create the visualization
         plt.figure(figsize=(fig_width, fig_height))
 
         # Assign positions
         pos = {}
 
-        def evenly_spaced_positions(nodes, y_pos):
-            """Generate x positions for nodes evenly spaced between 0 and 1."""
-            count = len(nodes)
-            if count == 1:
-                return {nodes[0]: (0.5, y_pos)}
-            return {node: ((i + 1) / (count + 1), y_pos) for i, node in enumerate(nodes)}
+        def numeric_suffix(name):
+            digits = ''.join(ch for ch in name if ch.isdigit())
+            return int(digits) if digits else 10_000
 
-        # Position routers in the center row (y=0)
-        pos.update(evenly_spaced_positions(router_nodes, y_pos=0))
-        # Position EdgeNodes in the lower row (y=-2)
-        pos.update(evenly_spaced_positions(edge_nodes, y_pos=-2))
-        # Position other nodes (e.g., switches) in the row between routers and EdgeNodes (y=-1)
-        pos.update(evenly_spaced_positions(other_nodes, y_pos=-1))
+        is_geant_like = "rmc" in G and any(node.startswith("n") and node[1:].isdigit() for node in G.nodes())
+
+        if is_geant_like:
+            geant_routers = sorted(
+                [node for node in router_nodes if node != "rmc" and node in G],
+                key=numeric_suffix,
+            )
+            geant_edges = sorted(
+                [node for node in edge_nodes if node.startswith("n") and node[1:].isdigit()],
+                key=numeric_suffix,
+            )
+
+            inner_radius = max(3.4, 0.55 * max(1, len(geant_routers)))
+            outer_radius = inner_radius + 2.8
+            router_angles = {}
+
+            # Inner ring: all routers except rmc.
+            for i, router in enumerate(geant_routers):
+                angle = (2 * math.pi * i / max(1, len(geant_routers))) + math.pi / 2
+                router_angles[router] = angle
+                pos[router] = (inner_radius * math.cos(angle), inner_radius * math.sin(angle))
+
+            # Center: dedicated multicast router.
+            if "rmc" in G:
+                pos["rmc"] = (0.0, 0.0)
+
+            # Outer ring: nX aligned with their corresponding router r(X+1) when available.
+            for node in geant_edges:
+                idx = numeric_suffix(node)
+                mapped_router = f"r{idx + 1}"
+                angle = router_angles.get(mapped_router, (2 * math.pi * idx / max(1, len(geant_edges))) + math.pi / 2)
+                pos[node] = (outer_radius * math.cos(angle), outer_radius * math.sin(angle))
+
+            # NAT on outer ring near r1 if available.
+            if "nat0" in G:
+                nat_angle = router_angles.get("r1", -math.pi / 2)
+                pos["nat0"] = ((outer_radius + 0.9) * math.cos(nat_angle), (outer_radius + 0.9) * math.sin(nat_angle))
+
+            # Place remaining nodes (e.g., switches) near neighbor centroids.
+            for node in other_nodes:
+                if node not in G:
+                    continue
+                neighbors = list(G.neighbors(node))
+                neighbor_positions = [pos[n] for n in neighbors if n in pos]
+                if neighbor_positions:
+                    cx = sum(x for x, _ in neighbor_positions) / len(neighbor_positions)
+                    cy = sum(y for _, y in neighbor_positions) / len(neighbor_positions)
+                    pos[node] = (cx * 0.9, cy * 0.9)
+                else:
+                    pos[node] = (0.0, -outer_radius - 1.0)
+        else:
+            def evenly_spaced_positions(nodes, y_pos):
+                """Generate x positions for nodes evenly spaced between 0 and 1."""
+                count = len(nodes)
+                if count == 1:
+                    return {nodes[0]: (0.5, y_pos)}
+                return {node: ((i + 1) / (count + 1), y_pos) for i, node in enumerate(nodes)}
+
+            # Default non-GEANT layout: rows.
+            pos.update(evenly_spaced_positions(router_nodes, y_pos=0))
+            pos.update(evenly_spaced_positions(edge_nodes, y_pos=-2))
+            pos.update(evenly_spaced_positions(other_nodes, y_pos=-1))
 
         # Create edge labels with IP information
         edge_labels = {}
@@ -553,8 +1103,43 @@ def visualize_network(request_handler=None, query_params=None, body=None):
                 edge_labels[edge_key] = ""
 
         # Draw nodes and edges with color mapping
-        nx.draw(G, pos, with_labels=True, node_size=700, font_size=10, font_color="white", font_weight="bold", node_color=node_colors, edge_color=edge_colors, width=line_width, style=edge_styles)
-        nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=10, font_color="gray")
+        up_edges = [edge for edge in G.edges if G.edges[edge]["status"] == "up"]
+        down_edges = [edge for edge in G.edges if G.edges[edge]["status"] != "up"]
+        edge_color_by_edge = {tuple(sorted(edge)): edge_colors[i] for i, edge in enumerate(G.edges())}
+
+        nx.draw_networkx_nodes(G, pos, node_size=900 if is_geant_like else 700, node_color=node_colors)
+        nx.draw_networkx_labels(G, pos, font_size=10, font_color="white", font_weight="bold")
+
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            edgelist=up_edges,
+            edge_color=[edge_color_by_edge[tuple(sorted(edge))] for edge in up_edges],
+            width=line_width,
+            alpha=0.9,
+            connectionstyle="arc3,rad=0.06" if is_geant_like else "arc3,rad=0.0",
+        )
+        nx.draw_networkx_edges(
+            G,
+            pos,
+            edgelist=down_edges,
+            edge_color=[edge_color_by_edge[tuple(sorted(edge))] for edge in down_edges],
+            width=line_width,
+            alpha=0.7,
+            style="dashed",
+            connectionstyle="arc3,rad=0.06" if is_geant_like else "arc3,rad=0.0",
+        )
+
+        # Keep interface/IP labels visible; use a compact style for GEANT to reduce clutter.
+        nx.draw_networkx_edge_labels(
+            G,
+            pos,
+            edge_labels=edge_labels,
+            font_size=7 if is_geant_like else 10,
+            font_color="dimgray" if is_geant_like else "gray",
+            bbox={"alpha": 0.55, "facecolor": "white", "edgecolor": "none", "pad": 0.15} if is_geant_like else None,
+            rotate=False if is_geant_like else True,
+        )
         
         # Save the visualization to a PNG image in memory
         buffer = BytesIO()

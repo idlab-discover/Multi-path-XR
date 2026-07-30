@@ -1,17 +1,98 @@
-use std::{sync::{Arc, Mutex}, thread};
+use metrics::get_metrics;
+use prometheus::IntGauge;
 use rust_socketio::client::Client;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+};
 use tokio::{runtime::Runtime, sync::RwLock};
 use tracing::{debug, error, info, instrument};
-use webrtc::{ice_transport::ice_candidate::RTCIceCandidateInit, peer_connection::{
-        peer_connection_state::RTCPeerConnectionState, sdp::session_description::RTCSessionDescription, RTCPeerConnection
-    }, rtp_transceiver::rtp_codec::RTPCodecType
+use webrtc::{
+    ice_transport::ice_candidate::RTCIceCandidateInit,
+    peer_connection::{
+        peer_connection_state::RTCPeerConnectionState,
+        sdp::session_description::RTCSessionDescription, RTCPeerConnection,
+    },
+    rtp_transceiver::rtp_codec::RTPCodecType,
 };
 
 use crate::{
+    clock::{ClockDomain, ClockSourceKey},
     processing::ProcessingPipeline,
     services::stream_manager::StreamManager,
 };
-use shared_utils::{peer_connection::create_webrtc_peer_connection, track_remote_pointcloud_rtp::TrackRemotePointCloudRTP, types::FrameTaskData};
+use shared_utils::{
+    peer_connection::create_webrtc_peer_connection,
+    track_remote_spatial_rtp::TrackRemoteSpatialRtp, types::FrameTaskData,
+};
+
+const WEBRTC_PEER_CONNECTS_TOTAL_HELP: &str =
+    "Total number of WebRTC peer connections that reached the connected state";
+const WEBRTC_PEER_DISCONNECTS_TOTAL_HELP: &str =
+    "Total number of WebRTC peer disconnect events after a successful peer connection";
+const WEBRTC_TRACKS_STARTED_TOTAL_HELP: &str =
+    "Total number of WebRTC remote tracks started by the receiver";
+
+struct WebRTCRuntimeMetrics {
+    peer_connects_total: IntGauge,
+    peer_disconnects_total: IntGauge,
+    tracks_started_total: IntGauge,
+    peer_connected: AtomicBool,
+}
+
+impl WebRTCRuntimeMetrics {
+    fn new() -> Self {
+        let metrics = get_metrics();
+
+        Self {
+            peer_connects_total: metrics
+                .get_or_create_gauge(
+                    "webrtc_peer_connects_total",
+                    WEBRTC_PEER_CONNECTS_TOTAL_HELP,
+                )
+                .expect("webrtc_peer_connects_total"),
+            peer_disconnects_total: metrics
+                .get_or_create_gauge(
+                    "webrtc_peer_disconnects_total",
+                    WEBRTC_PEER_DISCONNECTS_TOTAL_HELP,
+                )
+                .expect("webrtc_peer_disconnects_total"),
+            tracks_started_total: metrics
+                .get_or_create_gauge(
+                    "webrtc_tracks_started_total",
+                    WEBRTC_TRACKS_STARTED_TOTAL_HELP,
+                )
+                .expect("webrtc_tracks_started_total"),
+            peer_connected: AtomicBool::new(false),
+        }
+    }
+
+    fn record_peer_connected(&self) {
+        if !self.peer_connected.swap(true, Ordering::SeqCst) {
+            self.peer_connects_total.inc();
+        }
+    }
+
+    fn record_peer_disconnected(&self) {
+        if self.peer_connected.swap(false, Ordering::SeqCst) {
+            self.peer_disconnects_total.inc();
+        }
+    }
+
+    fn record_track_started(&self) {
+        self.tracks_started_total.inc();
+    }
+
+    fn reset(&self) {
+        self.peer_connects_total.set(0);
+        self.peer_disconnects_total.set(0);
+        self.tracks_started_total.set(0);
+        self.peer_connected.store(false, Ordering::SeqCst);
+    }
+}
 
 /// A client-side module for receiving frames via WebRTC data channel.
 pub struct WebRTCIngress {
@@ -22,17 +103,18 @@ pub struct WebRTCIngress {
     /// Pending ICE candidates to be applied after the remote description is set
     pending_candidates: RwLock<Vec<RTCIceCandidateInit>>,
     pub runtime: Arc<Mutex<Option<Runtime>>>,
-    track_handlers: Arc<RwLock<Vec<TrackRemotePointCloudRTP>>>,
+    track_handlers: Arc<RwLock<Vec<TrackRemoteSpatialRtp>>>,
+    runtime_metrics: Arc<WebRTCRuntimeMetrics>,
+    clock_source_id: Arc<Mutex<Option<String>>>,
 }
 crate::log_drop!(WebRTCIngress);
 
 impl WebRTCIngress {
     /// Create a new, empty instance. Typically called once from `Ingress::initialize()`.
-    pub fn initialize(
-        stream_manager: Arc<StreamManager>,
-        pipeline: Arc<ProcessingPipeline>,
-    ) {
+    pub fn initialize(stream_manager: Arc<StreamManager>, pipeline: Arc<ProcessingPipeline>) {
         let runtime = Arc::clone(&pipeline.runtime);
+        let runtime_metrics = Arc::new(WebRTCRuntimeMetrics::new());
+        runtime_metrics.reset();
 
         let ingress = Arc::new(Self {
             pc: RwLock::new(None),
@@ -40,16 +122,20 @@ impl WebRTCIngress {
             pending_candidates: RwLock::new(Vec::new()),
             runtime,
             track_handlers: Arc::new(RwLock::new(Vec::new())),
+            runtime_metrics,
+            clock_source_id: Arc::new(Mutex::new(None)),
         });
         // Keep a reference to ourselves in the StreamManager
         stream_manager.set_webrtc_ingress(ingress);
     }
 
     pub fn stop(&self) {
+        let runtime_metrics = Arc::clone(&self.runtime_metrics);
         if let Some(rt) = self.runtime.lock().unwrap().as_ref() {
             rt.block_on(async {
                 if let Some(pc) = self.pc.write().await.take() {
                     let _ = pc.close().await;
+                    runtime_metrics.record_peer_disconnected();
                 } else {
                     error!("WebRTC PeerConnection was already stopped or not initialized");
                 }
@@ -69,13 +155,20 @@ impl WebRTCIngress {
         }
     }
 
+    pub fn set_clock_source_id(&self, clock_source_id: Option<String>) {
+        *self.clock_source_id.lock().unwrap() = clock_source_id;
+    }
+
     /// Actually create the PeerConnection on the client side, attach handlers, and produce an SDP offer.
     //#[instrument(skip(self))]
-    pub async fn create_offer(self: Arc<Self>, ws_socket: &Arc<Mutex<Option<Client>>>) -> Result<String, String> {
+    pub async fn create_offer(
+        self: Arc<Self>,
+        ws_socket: &Arc<Mutex<Option<Client>>>,
+    ) -> Result<String, String> {
         // 1) Create PeerConnection
         let pc = create_webrtc_peer_connection().await?;
 
-        // 2) **Forward client-side ICE to server**:  
+        // 2) **Forward client-side ICE to server**:
         //    Whenever the client finds a new ICE candidate,
         //    it sends it to the server as `webrtc_ice_candidate`.
         let socket_weak = Arc::downgrade(ws_socket);
@@ -119,30 +212,39 @@ impl WebRTCIngress {
         // Set the handler for Peer connection state
         // This will notify you when the peer has connected/disconnected
         let ingress_clone = Arc::clone(&self);
-        pc.on_peer_connection_state_change(Box::new(
-            move |s: RTCPeerConnectionState| {
-                info!("Peer Connection State has changed: {s}");
-                let ingress_clone = Arc::clone(&ingress_clone);
-                Box::pin(async move {
-                    if matches!(s, RTCPeerConnectionState::Disconnected | RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed) {
-                        info!("Cleaning up peer connection");
-                        // Stop all tracks
-                        {
-                            let mut handlers = ingress_clone.track_handlers.write().await;
-                            info!("Stopping {} track handlers", handlers.len());
-                            for mut track in handlers.drain(..) {
-                                if let Err(e) = track.stop().await {
-                                    error!("Failed to stop track: {:?}", e);
-                                } else {
-                                    info!("Track stopped successfully");
-                                }
+        let peer_state_metrics = Arc::clone(&self.runtime_metrics);
+        pc.on_peer_connection_state_change(Box::new(move |s: RTCPeerConnectionState| {
+            info!("Peer Connection State has changed: {s}");
+            let ingress_clone = Arc::clone(&ingress_clone);
+            let peer_state_metrics = Arc::clone(&peer_state_metrics);
+            Box::pin(async move {
+                if matches!(s, RTCPeerConnectionState::Connected) {
+                    peer_state_metrics.record_peer_connected();
+                }
+                if matches!(
+                    s,
+                    RTCPeerConnectionState::Disconnected
+                        | RTCPeerConnectionState::Failed
+                        | RTCPeerConnectionState::Closed
+                ) {
+                    peer_state_metrics.record_peer_disconnected();
+                    info!("Cleaning up peer connection");
+                    // Stop all tracks
+                    {
+                        let mut handlers = ingress_clone.track_handlers.write().await;
+                        info!("Stopping {} track handlers", handlers.len());
+                        for mut track in handlers.drain(..) {
+                            if let Err(e) = track.stop().await {
+                                error!("Failed to stop track: {:?}", e);
+                            } else {
+                                info!("Track stopped successfully");
                             }
-                            info!("All tracks stopped");
                         }
+                        info!("All tracks stopped");
                     }
-                })
+                }
             })
-        );
+        }));
 
         pc.add_transceiver_from_kind(RTPCodecType::Video, None)
             .await
@@ -150,23 +252,44 @@ impl WebRTCIngress {
 
         let pipeline_clone = self.pipeline.clone();
         let track_handlers_clone = Arc::clone(&self.track_handlers);
-        pc.on_track(Box::new(move | track, _receiver, _transceiver| {
+        let track_metrics = Arc::clone(&self.runtime_metrics);
+        let clock_source_id = Arc::clone(&self.clock_source_id);
+        pc.on_track(Box::new(move |track, _receiver, _transceiver| {
             let p = pipeline_clone.clone();
             let th = track_handlers_clone.clone();
+            let track_metrics = Arc::clone(&track_metrics);
+            let clock_source_id = Arc::clone(&clock_source_id);
             Box::pin(async move {
                 info!("Created new track");
-                let some_on_frame_cb = Arc::new(move |frame: FrameTaskData| { 
+                track_metrics.record_track_started();
+                let some_on_frame_cb = Arc::new(move |frame: FrameTaskData| {
                     // info!("Received frame with {} bytes", frame.data.len());
-                
-                    p.ingest_data(
-                        format!("client_{}_{}", frame.sfu_client_id.unwrap_or(0), frame.sfu_tile_index.unwrap_or(0)),
+
+                    let clock_source = clock_source_id
+                        .lock()
+                        .unwrap()
+                        .clone()
+                        .map(|server_instance_id| {
+                            ClockSourceKey::with_server_id(ClockDomain::WebRtc, server_instance_id)
+                        })
+                        .unwrap_or_else(|| ClockSourceKey::for_transport(ClockDomain::WebRtc));
+
+                    p.ingest_frame_data_for_source(
+                        clock_source,
+                        format!(
+                            "client_{}_{}",
+                            frame.client_id.unwrap_or(0),
+                            frame.quality_index.unwrap_or(0)
+                        ),
                         0,
                         frame.send_time,
                         frame.presentation_time,
-                        frame.data);
+                        frame.payload_metadata,
+                        frame.data,
+                    );
                 });
 
-               let mut remote_pc_track = TrackRemotePointCloudRTP::new(track, some_on_frame_cb);
+                let mut remote_pc_track = TrackRemoteSpatialRtp::new(track, some_on_frame_cb);
                 remote_pc_track.start();
                 // Store handler so it can be stopped later
                 {
@@ -205,7 +328,6 @@ impl WebRTCIngress {
             Some(pc) => pc.clone(),
             None => return Err("No PeerConnection available".to_string()),
         };
-
 
         let desc = serde_json::from_str::<RTCSessionDescription>(&answer_sdp)
             .map_err(|e| format!("Invalid answer: {e}"))?;
@@ -252,7 +374,6 @@ impl WebRTCIngress {
             ..Default::default()
         };
 
-
         let desc: Option<RTCSessionDescription> = pc.remote_description().await;
         if desc.is_none() {
             info!("Remote description is None, storing ICE candidate for later");
@@ -266,5 +387,66 @@ impl WebRTCIngress {
             .await
             .map_err(|e| format!("Failed to add ICE candidate: {e}"))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    fn ensure_metrics_initialized() {
+        if catch_unwind(AssertUnwindSafe(metrics::get_metrics)).is_ok() {
+            return;
+        }
+
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _ = metrics::MetricsBuilder::new()
+                .add_label("mode", "client-test")
+                .build();
+        }));
+
+        assert!(
+            catch_unwind(AssertUnwindSafe(metrics::get_metrics)).is_ok(),
+            "failed to initialize global metrics for receiver tests"
+        );
+    }
+
+    #[test]
+    fn webrtc_runtime_metrics_record_connect_disconnect_and_tracks() {
+        ensure_metrics_initialized();
+
+        let metrics = WebRTCRuntimeMetrics::new();
+        metrics.reset();
+        metrics.record_peer_connected();
+        metrics.record_peer_connected();
+        metrics.record_track_started();
+        metrics.record_track_started();
+        metrics.record_peer_disconnected();
+        metrics.record_peer_disconnected();
+
+        let registry = get_metrics();
+        let peer_connects_total = registry
+            .get_or_create_gauge(
+                "webrtc_peer_connects_total",
+                WEBRTC_PEER_CONNECTS_TOTAL_HELP,
+            )
+            .unwrap();
+        let peer_disconnects_total = registry
+            .get_or_create_gauge(
+                "webrtc_peer_disconnects_total",
+                WEBRTC_PEER_DISCONNECTS_TOTAL_HELP,
+            )
+            .unwrap();
+        let tracks_started_total = registry
+            .get_or_create_gauge(
+                "webrtc_tracks_started_total",
+                WEBRTC_TRACKS_STARTED_TOTAL_HELP,
+            )
+            .unwrap();
+
+        assert_eq!(peer_connects_total.get(), 1);
+        assert_eq!(peer_disconnects_total.get(), 1);
+        assert_eq!(tracks_started_total.get(), 2);
     }
 }

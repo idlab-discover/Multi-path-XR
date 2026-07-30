@@ -1,29 +1,38 @@
 // egress/file.rs
 
 use std::{
-    fs::{self, File}, io::Write, path::PathBuf, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::{SystemTime, UNIX_EPOCH}
+    fs::{self, File},
+    io::Write,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
-    encoders::EncodingFormat,
-    processing::{aggregator::PointCloudAggregator, ProcessingPipeline},
-    services::stream_manager::StreamManager
+    processing::{aggregator::SpatialFrameAggregator, ProcessingPipeline},
+    services::stream_manager::StreamManager,
 };
-use shared_utils::types::{FrameTaskData, PointCloudData};
 use circular_buffer::CircularBuffer;
+use shared_utils::types::{FramePayloadMetadata, FrameTaskData, SpatialFrameData};
+use spatial_codecs::encoder::EncodingFormat;
 use tracing::{debug, error, info, instrument};
 
-use super::egress_common::{push_preencoded_frame_data, EgressCommonMetrics, EgressProtocol};
+use super::egress_common::{
+    push_preencoded_frame_data, AtomicEncodingFormat, EgressCommonMetrics, EgressProtocol,
+};
 
 #[derive(Clone, Debug)]
 pub struct FileEgress {
     processing_pipeline: Arc<ProcessingPipeline>,
     frame_buffer: Arc<Mutex<CircularBuffer<10, FrameTaskData>>>,
-    aggregator: Arc<PointCloudAggregator>,
+    aggregator: Arc<SpatialFrameAggregator>,
     threads_started: Arc<AtomicBool>,
-    fps: Arc<Mutex<u32>>,
-    encoding_format: Arc<Mutex<EncodingFormat>>,
-    max_number_of_points: Arc<Mutex<u64>>,
+    fps: Arc<AtomicU32>,
+    encoding_format: Arc<AtomicEncodingFormat>,
+    max_number_of_primitives: Arc<AtomicU64>,
     egress_metrics: Arc<EgressCommonMetrics>,
 }
 
@@ -33,31 +42,31 @@ impl FileEgress {
         stream_manager: Arc<StreamManager>,
         processing_pipeline: Arc<ProcessingPipeline>,
     ) {
-        let aggregator = Arc::new(PointCloudAggregator::new(stream_manager.clone()));
+        let aggregator = Arc::new(SpatialFrameAggregator::new(stream_manager.clone()));
 
         let instance = Arc::new(Self {
             processing_pipeline: processing_pipeline.clone(),
             frame_buffer: Arc::new(Mutex::new(CircularBuffer::new())),
             aggregator: aggregator.clone(),
             threads_started: Arc::new(AtomicBool::new(false)),
-            fps: Arc::new(Mutex::new(30)),
-            encoding_format: Arc::new(Mutex::new(EncodingFormat::Draco)),
-            max_number_of_points: Arc::new(Mutex::new(100000)),
+            fps: Arc::new(AtomicU32::new(30)),
+            encoding_format: Arc::new(AtomicEncodingFormat::new(EncodingFormat::Draco)),
+            max_number_of_primitives: Arc::new(AtomicU64::new(100000)),
             egress_metrics: Arc::new(EgressCommonMetrics::new()),
         });
 
         stream_manager.set_file_egress(instance.clone());
     }
-} 
+}
 
 impl EgressProtocol for FileEgress {
     #[inline]
     fn encoding_format(&self) -> EncodingFormat {
-        *self.encoding_format.lock().unwrap()
+        self.encoding_format.load()
     }
-    
-    fn max_number_of_points(&self) -> u64 {
-        *self.max_number_of_points.lock().unwrap()
+
+    fn max_number_of_primitives(&self) -> u64 {
+        self.max_number_of_primitives.load(Ordering::Relaxed)
     }
 
     fn ensure_threads_started(&self) {
@@ -75,7 +84,7 @@ impl EgressProtocol for FileEgress {
             self.frame_buffer.clone(),
             self.fps.clone(),
             self.encoding_format.clone(),
-            self.max_number_of_points.clone(),
+            self.max_number_of_primitives.clone(),
         );
 
         let self_clone = self.clone();
@@ -85,30 +94,40 @@ impl EgressProtocol for FileEgress {
             move |frame| {
                 self_clone.emit_frame_data(frame);
             },
-            true
+            true,
         );
     }
 
-    fn push_point_cloud(&self, point_cloud: PointCloudData, stream_id: String) {
+    fn push_spatial_frame(&self, spatial_frame: SpatialFrameData, stream_id: String) {
         self.ensure_threads_started();
-        self.aggregator.update_point_cloud(stream_id, point_cloud);
+        self.aggregator
+            .update_spatial_frame(stream_id, spatial_frame);
     }
 
-    fn push_encoded_frame(&self, raw_data: Vec<u8>, _stream_id: String, mut creation_time: u64, presentation_time: u64, ring_buffer_bypass: bool, client_id: Option<u64>, tile_index: Option<u32>) {
+    fn push_encoded_frame(
+        &self,
+        raw_data: Vec<u8>,
+        _stream_id: String,
+        mut creation_time: u64,
+        presentation_time: u64,
+        ring_buffer_bypass: bool,
+        payload_metadata: Option<FramePayloadMetadata>,
+        client_id: Option<u64>,
+        quality_index: Option<u32>,
+    ) {
         self.ensure_threads_started();
 
         let self_clone = self.clone();
         let bypass = if ring_buffer_bypass {
-
             let since_the_epoch = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("Time went backwards");
             creation_time = since_the_epoch.as_micros() as u64;
 
-
             Some(Box::new(move |frame| {
                 self_clone.emit_frame_data(frame);
-            }) as Box<dyn Fn(FrameTaskData) + Send + 'static>)
+            })
+                as Box<dyn Fn(FrameTaskData) + Send + 'static>)
         } else {
             None
         };
@@ -119,12 +138,11 @@ impl EgressProtocol for FileEgress {
             creation_time,
             presentation_time,
             raw_data,
+            payload_metadata,
             bypass,
-            self.egress_metrics.bytes_to_send.clone(),
-            self.egress_metrics.frame_drops_full_egress_buffer.clone(),
-            self.egress_metrics.number_of_combined_frames.clone(),
+            self.egress_metrics.as_ref(),
             client_id,
-            tile_index,
+            quality_index,
         );
     }
 
@@ -138,10 +156,14 @@ impl EgressProtocol for FileEgress {
         let extension = String::from_utf8_lossy(ext_bytes).to_lowercase();
 
         let mut path = PathBuf::from("dist/exports");
-        let client_id = frame.sfu_client_id.map_or("unknown".to_string(), |c| c.to_string());
-        let tile = frame.sfu_tile_index.map_or("unknown".to_string(), |t| t.to_string());
+        let client_id = frame
+            .client_id
+            .map_or("unknown".to_string(), |c| c.to_string());
+        let quality = frame
+            .quality_index
+            .map_or("unknown".to_string(), |t| t.to_string());
         let send_time = frame.send_time;
-        let stream_id = format!("client_{client_id}_{tile}");
+        let stream_id = format!("client_{client_id}_{quality}");
         info!("FileEgress: stream_id: {}", stream_id);
         path.push(stream_id);
 
@@ -167,14 +189,15 @@ impl EgressProtocol for FileEgress {
     }
 
     fn set_fps(&self, fps: u32) {
-        *self.fps.lock().unwrap() = fps;
+        self.fps.store(fps.max(1), Ordering::Relaxed);
     }
 
     fn set_encoding_format(&self, encoding_format: EncodingFormat) {
-        *self.encoding_format.lock().unwrap() = encoding_format;
+        self.encoding_format.store(encoding_format);
     }
 
-    fn set_max_number_of_points(&self, max_number_of_points: u64) {
-        *self.max_number_of_points.lock().unwrap() = max_number_of_points;
+    fn set_max_number_of_primitives(&self, max_number_of_primitives: u64) {
+        self.max_number_of_primitives
+            .store(max_number_of_primitives, Ordering::Relaxed);
     }
 }

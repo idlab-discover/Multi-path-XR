@@ -1,68 +1,61 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bitcode::{Encode as EncodeBitcode, Decode as DecodeBitcode};
+use spatial_utils::point::Point3D;
+use spatial_utils::splat::GaussianSplatF32;
+
 use serde::{Deserialize, Serialize};
-use ply_rs::ply::{Property, PropertyAccess};
-use tracing::warn;
 
-#[derive(Clone, Debug, Deserialize, Serialize, EncodeBitcode, DecodeBitcode, PartialEq, Default)]
-pub struct Point3D {
-    pub x: f32,
-    pub y: f32,
-    pub z: f32,
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
+pub type BasicResult = Result<(), Box<dyn std::error::Error>>;
+
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FramePayloadContainer {
+    #[default]
+    Raw = 0,
+    Pcf = 1,
 }
 
-
-impl PropertyAccess for Point3D {
-    fn new() -> Self {
-        // Return a default/zeroed-out struct
-        Point3D::default()
-    }
-
-    fn set_property(&mut self, key: &str, property: Property) {
-        match (key, property) {
-            ("x", Property::Float(v)) => self.x = v,
-            ("y", Property::Float(v)) => self.y = v,
-            ("z", Property::Float(v)) => self.z = v,
-            ("x", Property::Double(v)) => self.x = v as f32,
-            ("y", Property::Double(v)) => self.y = v as f32,
-            ("z", Property::Double(v)) => self.z = v as f32,
-            ("red", Property::UChar(v)) => self.r = v,
-            ("green", Property::UChar(v)) => self.g = v,
-            ("blue", Property::UChar(v)) => self.b = v,
-            // Possibly handle other property types or names, e.g. "Property::Float"
-            (k, _) => warn!("Ignoring unexpected key or property type: {}", k),
-        }
-    }
+#[repr(u8)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum FrameRenderPrimitive {
+    #[default]
+    Points = 0,
+    GaussianSplats = 1,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, EncodeBitcode, DecodeBitcode)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct FramePayloadMetadata {
+    pub container: FramePayloadContainer,
+    pub primitive: FrameRenderPrimitive,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FrameTaskData {
     pub send_time: u64,
     pub presentation_time: u64,
+    pub payload_metadata: FramePayloadMetadata,
     pub data: Vec<u8>,
-    // fields for SFU usage
+    // fields for SFU/Relay/DASH usage
     // (all optional so existing code can ignore them)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sfu_client_id: Option<u64>,
+    pub client_id: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sfu_frame_len: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sfu_tile_index: Option<u32>,
+    pub quality_index: Option<u32>,
 }
 
 // Implement PartialEq for FrameTaskData
 impl PartialEq for FrameTaskData {
     fn eq(&self, other: &Self) -> bool {
-            self.presentation_time == other.presentation_time
-            && self.sfu_client_id.is_none_or(|cid| other.sfu_client_id.is_none_or(|other_cid| cid == other_cid))
-            && self.sfu_tile_index.is_none_or(|ti| other.sfu_tile_index.is_none_or(|other_ti| ti == other_ti))
-            && self.sfu_frame_len.is_none_or(|fl| other.sfu_frame_len.is_none_or(|other_fl| fl == other_fl))
+        self.presentation_time == other.presentation_time
+            && self
+                .client_id
+                .is_none_or(|cid| other.client_id.is_none_or(|other_cid| cid == other_cid))
+            && self
+                .quality_index
+                .is_none_or(|ti| other.quality_index.is_none_or(|other_ti| ti == other_ti))
+            && self.payload_metadata == other.payload_metadata
             && self.data == other.data
-            // We ignore the send time in the comparison
+        // We ignore the send time in the comparison
     }
 }
 
@@ -77,28 +70,87 @@ impl PartialOrd for FrameTaskData {
     }
 }
 
+#[derive(Clone)]
+pub struct FrameData {
+    pub send_time: u64,
+    pub presentation_time: u64,
+    pub receive_time: u64,
+    pub quality_index: Option<u32>,
+    pub render_primitive: FrameRenderPrimitive,
+    pub error_count: u64,
+    pub point_count: u64,
+    pub coordinates: Vec<f32>,
+    pub colors: Vec<u8>,
+    pub gaussian_scales: Vec<f32>,
+    pub gaussian_rotations: Vec<f32>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct PointCloudData {
-    pub points: Vec<Point3D>,
+pub enum SpatialPayload {
+    Points(Vec<Point3D>),
+    GaussianSplats(Vec<GaussianSplatF32>),
+}
+
+impl SpatialPayload {
+    #[inline]
+    pub fn primitive(&self) -> FrameRenderPrimitive {
+        match self {
+            Self::Points(_) => FrameRenderPrimitive::Points,
+            Self::GaussianSplats(_) => FrameRenderPrimitive::GaussianSplats,
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        match self {
+            Self::Points(points) => points.len(),
+            Self::GaussianSplats(splats) => splats.len(),
+        }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SpatialFrameData {
+    pub payload: SpatialPayload,
     pub creation_time: u64,
     pub presentation_time: u64,
     pub error_count: u64,
 }
 
-// Implement the default trait for PointCloudData
-impl Default for PointCloudData {
+impl SpatialFrameData {
+    #[inline]
+    pub fn render_primitive(&self) -> FrameRenderPrimitive {
+        self.payload.primitive()
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.payload.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.payload.is_empty()
+    }
+}
+
+impl Default for SpatialFrameData {
     fn default() -> Self {
-        // Get the current time
         let since_the_epoch = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards");
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards");
         let current_time = since_the_epoch.as_micros() as u64;
-        let presentation_tim_offset = 100_000; // microseconds after creation time
+        let presentation_time_offset = 100_000;
 
         Self {
-            points: Vec::new(),
+            payload: SpatialPayload::Points(Vec::new()),
             creation_time: current_time,
-            presentation_time: current_time + presentation_tim_offset,
+            presentation_time: current_time + presentation_time_offset,
             error_count: 0,
         }
     }

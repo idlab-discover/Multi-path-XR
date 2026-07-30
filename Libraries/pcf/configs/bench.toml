@@ -1,0 +1,53 @@
+[datasets]
+roots = ["Datasets/longdress/Ply"]
+limit = 300
+
+[datasets.resample]
+strategy = "count"
+count = 100000
+
+[pcf]
+streams = 1
+delta = "index-aligned"
+gop = 1
+mtu = 1200
+[pcf.fidelity]
+rmse = true
+psnr_y = true
+d1_symmetric = false
+
+[[sweeps]]
+name = "Bitcode"
+params = { Bitcode = {} }
+
+[[sweeps]]
+name = "Bitcode+Zstd"
+params = { Zstd = { level = 3, inner = { Bitcode = {} } } }
+
+[[sweeps]]
+name = "Quantize@p11c8"
+params = { Quantize = { position_bits = 11, color_bits = 8 } }
+
+[[sweeps]]
+name = "Quantize@p11c8+delta+Zstd"
+params = { Zstd = { level = 3, inner = { Quantize = { position_bits = 11, color_bits = 8, max_palette_colors = 0, delta_positions = true, delta_colors = true } } } }
+
+[[sweeps]]
+name = "Draco@qp11"
+params = { Draco = { method = "KdTree", position_qp = 11 } }
+
+[[sweeps]]
+name = "Draco@qp11+zstd1"
+params = { Zstd = { level = 1, inner = { Draco = { method = "KdTree", position_qp = 11 } } } }
+
+[[sweeps]]
+name = "OpenZL@Columnar(split_rgb)"
+params = { Openzl = { mode = "columnar", pack_rgb = false } }
+
+[[sweeps]]
+name = "OpenZL@Columnar(pack_rgb)"
+params = { Openzl = { mode = "columnar", pack_rgb = true } }
+
+[[sweeps]]
+name = "TMF+lz4"
+params = { Lz4 = { inner = { Tmf = {} } } }

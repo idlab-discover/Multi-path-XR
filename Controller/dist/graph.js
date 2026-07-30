@@ -241,3 +241,6 @@ module.exports = {
     Graph,
     buildGraph
 };
+
+window.buildGraph = buildGraph;
+window.Graph = Graph;
