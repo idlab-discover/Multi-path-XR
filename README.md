@@ -42,22 +42,35 @@ The project has the following dependencies, which need to be installed:
 - Ninja
 - MinGW (Used for cross-compiling to Windows)
 - smcroute
+- Python 3
+- libclang (used for generating bindings)
+- libfontconfig (used for rendering the network graph visualizations in the controller)
+- g++
+- build-essential
+- The correction dev version of libstdc++
 
-On linux, you can install these dependencies by running the following command:
+On linux, you can install these dependencies by running the following commands:
 
 ```bash
-sudo apt-get install cmake ninja-build mingw-w64 smcroute
-
-rustup target add x86_64-pc-windows-gnu
+sudo apt update
+sudo apt install cmake ninja-build mingw-w64 smcroute libssl-dev python3 libclang-dev libfontconfig1-dev build-essential g++
+GCC_TOOLCHAIN=$(clang++ -v 2>&1 | grep "Selected GCC installation" | awk '{print $4}')
+GCC_VERSION=$(basename "$GCC_TOOLCHAIN")
+sudo apt install -y "libstdc++-${GCC_VERSION}-dev"
 ```
 
+
+```
 In addition, you need to install the Rust toolchain. You can do this by running the following command:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup target add x86_64-pc-windows-gnu
 ```
 
-Finally, you need to install Docker and Docker Compose. You can do this by following the instructions on the [Docker Compose website](https://docs.docker.com/compose/install/).
+Next, you need to install Docker and Docker Compose. You can do this by following the instructions on the [Docker Compose website](https://docs.docker.com/compose/install/).
+
+Finally, to support the Slices CLI, you need to follow the steps in the [Slices README](./Environments/VirtualWall/README.md).
 
 # Building the Project
 
@@ -68,11 +81,13 @@ To build the project, you need to run the following commands:
 ```
 Parameters are defined in the build script and the scripts called by it.
 
-The following parameters are recommend to build the project:
+The following parameters are recommended to build the project:
 ```bash
-/build.sh --unstable --release
+./build.sh --unstable --release
 ```
-To speed up the build process during development, you can use `--no-tests`, but this will not run the unit tests and also not update the non-headless client.
+To speed up the build process during development, you can use `--no-bindings`, but this will not create the bindings for the headfull client.
+When building for Windows, you can use `--windows` to cross-compile the project for Windows.
+If building for execution on the local machine, you can enable `--native-opt` to optimize the build for the local machine architecture.
 
 # Running the Project
 
@@ -98,7 +113,6 @@ sudo ./run.sh --controller --release
 ```
 This is the recommended way to test the project. The controller can now be managed using the web interface at `http://localhost:3000/?release=true`.
 
-
 ## Contact
 
 If you have any questions or concerns, please feel free to contact us at [casper.haems@ugent.be](mailto:casper.haems@ugent.be) or [tim.wauters@ugent.be](mailto:jeroen.vanderhooft@ugent.be).
@@ -107,23 +121,27 @@ If you have any questions or concerns, please feel free to contact us at [casper
 
 If you use (parts of) this code, please cite the following paper:
 ```bibtex
-@INPROCEEDINGS{Haem2509:Efficient,
-    AUTHOR="Casper Haems and Matthias {De Fr{\'e}} and Tim Wauters and Filip {De Turck}",
-    TITLE="Towards Efficient Transport for {Real-Time} Immersive Applications over Hybrid Networks",
-    BOOKTITLE="2025 16th International Conference on Network of the Future (NoF) (NoF 2025)",
-    ADDRESS="Montreal, Canada",
-    PAGES=5,
-    DAYS=30,
-    MONTH=sep,
-    YEAR=2025,
-    KEYWORDS="volumetric video; hybrid broadcast-unicast; multi-path transport; real-time streaming; immersive media; 6DoF communication",
-    ABSTRACT="Immersive telepresence demands high data rates and low latency, yet no single commercial data path reliably meets these needs. Fine-grained content selection also remains underdeveloped. This work proposes a hybrid, multi-path delivery framework combining broadcast and unicast into a single service. A lightweight base scene is broadcast via File Delivery over Unidirectional Transport (FLUTE), ensuring no viewer ever sees a fully blank scene, while viewer-specific enhancements are steered over unicast. An open-source testbed is released to investigate the impact of network impairments, instrument common protocols, and enable reproducible experiments. On high-quality volumetric video (up to 100k points per frame at 30 frames per second), the hybrid design (i) keeps latency below 40 ms while scaling quality with unicast bandwidth, (ii) reduces server and network load compared to pure unicast, and (iii) masks typical wireless loss patterns with only 15\% Forward Error Correction (FEC) overhead. These findings show that treating broadcast and unicast as complementary channels is crucial for scalable Extended Reality (XR) services."
-}
+@INPROCEEDINGS{11223289,
+  author={Haems, Casper and De Fré, Matthias and Wauters, Tim and De Turck, Filip},
+  booktitle={2025 16th International Conference on Network of the Future (NoF)}, 
+  title={Towards Efficient Transport for Real-Time Immersive Applications over Hybrid Networks}, 
+  year={2025},
+  volume={},
+  number={},
+  pages={209-213},
+  keywords={Measurement;Wireless communication;Telepresence;Unicast;Bandwidth;Forward error correction;Throughput;User experience;WebRTC;Videos;Volumetric video;hybrid broadcast-unicast;multi-path transport;real-time streaming;immersive media},
+  doi={10.1109/NoF66640.2025.11223289}}
+
 ```
 
 # Funding
-This work has been funded by the European Union (SPIRIT
-project, Grant Agreement 101070672, [https://www.spiritproject.eu/](https://www.spiritproject.eu/)).
+Work up to and including commit [`4631e27`](https://github.com/idlab-discover/Multi-path-XR/commit/4631e27dab1f122940af16ab326133e0055bbd89)
+was funded by the European Union's [SPIRIT project](https://www.spiritproject.eu/)
+(Grant Agreement 101070672) and belongs to the work doi: [10.1109/NoF66640.2025.11223289](https://doi.org/10.1109/NoF66640.2025.11223289).
+
+Work introduced after that commit has been funded by the imec.icon project
+MAGNOLIA, co-financed by imec and Flanders Innovation & Entrepreneurship
+(VLAIO) under project HBC.2025.0436.
 
 # License
 This project is licensed under the MIT License.
